@@ -463,7 +463,6 @@ bool CDVDVideoCodecAndroidMediaCodec::Open(CDVDStreamInfo &hints, CDVDCodecOptio
       switch(hints.profile)
       {
         case FF_PROFILE_H264_HIGH_10:
-          profile = CJNIMediaCodecInfoCodecProfileLevel::AVCProfileHigh10;
           break;
         case FF_PROFILE_H264_HIGH_422:
           profile = CJNIMediaCodecInfoCodecProfileLevel::AVCProfileHigh422;
