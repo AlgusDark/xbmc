@@ -9,8 +9,13 @@
 #include "GUIScrollBarControl.h"
 
 #include "GUIMessage.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "input/mouse/MouseEvent.h"
+#include "input/mouse/MouseStat.h"
 #include "utils/StringUtils.h"
+
+using namespace KODI;
 
 #define MIN_NIB_SIZE 4.0f
 
@@ -313,16 +318,16 @@ void GUIScrollBarControl::SetFromPosition(const CPoint &point)
   }
 }
 
-EVENT_RESULT GUIScrollBarControl::OnMouseEvent(const CPoint &point, const CMouseEvent &event)
+EVENT_RESULT GUIScrollBarControl::OnMouseEvent(const CPoint& point, const MOUSE::CMouseEvent& event)
 {
-  if (event.m_id == ACTION_MOUSE_DRAG)
+  if (event.m_id == ACTION_MOUSE_DRAG || event.m_id == ACTION_MOUSE_DRAG_END)
   {
-    if (event.m_state == 1)
+    if (static_cast<HoldAction>(event.m_state) == HoldAction::DRAG)
     { // we want exclusive access
       CGUIMessage msg(GUI_MSG_EXCLUSIVE_MOUSE, GetID(), GetParentID());
       SendWindowMessage(msg);
     }
-    else if (event.m_state == 3)
+    else if (static_cast<HoldAction>(event.m_state) == HoldAction::DRAG_END)
     { // we're done with exclusive access
       CGUIMessage msg(GUI_MSG_EXCLUSIVE_MOUSE, 0, GetParentID());
       SendWindowMessage(msg);

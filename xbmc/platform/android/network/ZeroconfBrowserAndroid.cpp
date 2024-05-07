@@ -22,8 +22,8 @@
 #include <androidjni/jutils-details.hpp>
 
 CZeroconfBrowserAndroid::CZeroconfBrowserAndroid()
+  : m_manager(CJNIContext::getSystemService(CJNIContext::NSD_SERVICE))
 {
-  m_manager = CJNIContext::getSystemService(CJNIContext::NSD_SERVICE);
 }
 
 CZeroconfBrowserAndroid::~CZeroconfBrowserAndroid()
@@ -200,9 +200,7 @@ void CZeroconfBrowserAndroid::removeDiscoveredService(CZeroconfBrowserAndroidDis
 /******************************************************************/
 
 CZeroconfBrowserAndroidDiscover::CZeroconfBrowserAndroidDiscover(CZeroconfBrowserAndroid* browser)
-  : CJNIXBMCNsdManagerDiscoveryListener()
-  , m_browser(browser)
-  , m_isActive(false)
+  : CJNIXBMCNsdManagerDiscoveryListener(), m_browser(browser)
 {
 }
 

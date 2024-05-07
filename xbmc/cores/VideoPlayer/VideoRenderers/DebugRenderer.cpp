@@ -50,11 +50,7 @@ void CDebugRenderer::Dispose()
 {
   m_isInitialized = false;
   m_overlayRenderer.Flush();
-  if (m_overlay)
-  {
-    m_overlay->Release();
-    m_overlay = nullptr;
-  }
+  m_overlay.reset();
   if (m_adapter)
   {
     delete m_adapter;
@@ -94,6 +90,7 @@ void CDebugRenderer::SetInfo(DEBUG_INFO_VIDEO& video, DEBUG_INFO_RENDER& render)
   m_adapter->AddSubtitle(video.metaPrim, 0., 5000000.);
   m_adapter->AddSubtitle(video.metaLight, 0., 5000000.);
   m_adapter->AddSubtitle(video.shader, 0., 5000000.);
+  m_adapter->AddSubtitle(video.render, 0., 5000000.);
   m_adapter->AddSubtitle(render.renderFlags, 0., 5000000.);
   m_adapter->AddSubtitle(render.videoOutput, 0., 5000000.);
 }
@@ -119,14 +116,14 @@ CDebugRenderer::CRenderer::CRenderer() : OVERLAY::CRenderer()
 {
 }
 
-void CDebugRenderer::CRenderer::Render(int idx)
+void CDebugRenderer::CRenderer::Render(int idx, float depth)
 {
   std::vector<SElement>& list = m_buffers[idx];
   for (std::vector<SElement>::iterator it = list.begin(); it != list.end(); ++it)
   {
     if (it->overlay_dvd)
     {
-      CDVDOverlayLibass* ovAss = static_cast<CDVDOverlayLibass*>(it->overlay_dvd);
+      auto ovAss = std::static_pointer_cast<CDVDOverlayLibass>(it->overlay_dvd);
       if (!ovAss || !ovAss->GetLibassHandler())
         continue;
 
@@ -134,10 +131,11 @@ void CDebugRenderer::CRenderer::Render(int idx)
       if (updateStyle)
         CreateSubtitlesStyle();
 
-      COverlay* o = ConvertLibass(ovAss, it->pts, updateStyle, m_debugOverlayStyle);
+      std::shared_ptr<COverlay> o =
+          ConvertLibass(*ovAss, it->pts, updateStyle, m_debugOverlayStyle);
 
       if (o)
-        OVERLAY::CRenderer::Render(o);
+        OVERLAY::CRenderer::Render(o.get());
     }
   }
   ReleaseUnused();
@@ -148,5 +146,5 @@ void CDebugRenderer::CRenderer::CreateSubtitlesStyle()
   m_debugOverlayStyle = std::make_shared<KODI::SUBTITLES::STYLE::style>();
   m_debugOverlayStyle->fontName = KODI::SUBTITLES::FONT_DEFAULT_FAMILYNAME;
   m_debugOverlayStyle->fontSize = 20.0;
-  m_debugOverlayStyle->marginVertical = 30;
+  m_debugOverlayStyle->marginVertical = 12;
 }

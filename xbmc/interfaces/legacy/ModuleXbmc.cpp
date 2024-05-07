@@ -11,17 +11,16 @@
 #include "ModuleXbmc.h"
 
 #include "AddonUtils.h"
-#include "Application.h"
 #include "FileItem.h"
 #include "GUIInfoManager.h"
 #include "LangInfo.h"
 #include "LanguageHook.h"
-#include "PlayListPlayer.h"
 #include "ServiceBroker.h"
 #include "Util.h"
 #include "aojsonrpc.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPowerHandling.h"
 #include "cores/AudioEngine/Interfaces/AE.h"
-#include "filesystem/File.h"
 #include "guilib/GUIAudioManager.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
@@ -30,13 +29,16 @@
 #include "messaging/ApplicationMessenger.h"
 #include "network/Network.h"
 #include "network/NetworkServices.h"
+#include "playlists/PlayListTypes.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "storage/MediaManager.h"
 #include "storage/discs/IDiscDriveHandler.h"
 #include "threads/SystemClock.h"
 #include "utils/Crc32.h"
+#include "utils/ExecString.h"
 #include "utils/FileExtensionProvider.h"
+#include "utils/FileUtils.h"
 #include "utils/LangCodeExpander.h"
 #include "utils/MemUtils.h"
 #include "utils/StringUtils.h"
@@ -94,10 +96,13 @@ namespace XBMCAddon
       // builtins is no anarchy
       // enforce some rules here
       // DialogBusy must not be activated, it is modal dialog
-      std::string execute;
-      std::vector<std::string> params;
-      CUtil::SplitExecFunction(function, execute, params);
-      StringUtils::ToLower(execute);
+      const CExecString exec(function);
+      if (!exec.IsValid())
+        return;
+
+      const std::string execute = exec.GetFunction();
+      const std::vector<std::string> params = exec.GetParams();
+
       if (StringUtils::EqualsNoCase(execute, "activatewindow") ||
           StringUtils::EqualsNoCase(execute, "closedialog"))
       {
@@ -229,7 +234,7 @@ namespace XBMCAddon
     {
       XBMC_TRACE;
       char cTitleIP[32];
-      sprintf(cTitleIP, "127.0.0.1");
+      snprintf(cTitleIP, sizeof(cTitleIP), "127.0.0.1");
       CNetworkInterface* iface = CServiceBroker::GetNetwork().GetFirstConnectedInterface();
       if (iface)
         return iface->GetCurrentIPAddress();
@@ -324,7 +329,7 @@ namespace XBMCAddon
         return;
 
       CGUIComponent* gui = CServiceBroker::GetGUI();
-      if (XFILE::CFile::Exists(filename) && gui)
+      if (CFileUtils::Exists(filename) && gui)
       {
         gui->GetAudioManager().PlayPythonSound(filename,useCached);
       }
@@ -369,7 +374,9 @@ namespace XBMCAddon
     int getGlobalIdleTime()
     {
       XBMC_TRACE;
-      return g_application.GlobalIdleTime();
+      auto& components = CServiceBroker::GetAppComponents();
+      const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+      return appPower->GlobalIdleTime();
     }
 
     String getCacheThumbName(const String& path)
@@ -396,50 +403,67 @@ namespace XBMCAddon
     {
       XBMC_TRACE;
       std::string result;
+      CDateTime now = CDateTime::GetCurrentDateTime();
 
       if (StringUtils::CompareNoCase(id, "datelong") == 0)
       {
+        result = now.GetAsLocalizedDate(g_langInfo.GetDateFormat(true),
+                                        CDateTime::ReturnFormat::CHOICE_YES);
+      }
+      else if (StringUtils::CompareNoCase(id, "dateshort") == 0)
+      {
+        result = now.GetAsLocalizedDate(g_langInfo.GetDateFormat(false),
+                                        CDateTime::ReturnFormat::CHOICE_YES);
+      }
+      else if (StringUtils::CompareNoCase(id, "tempunit") == 0)
+      {
+        result = g_langInfo.GetTemperatureUnitString();
+      }
+      //TODO - There is a (low) risk that these 'raw' formats could be changed on Windows if they contain a '%-' sequence.
+      else if (StringUtils::CompareNoCase(id, "datelongraw") == 0)
+      {
         result = g_langInfo.GetDateFormat(true);
-        StringUtils::Replace(result, "DDDD", "%A");
-        StringUtils::Replace(result, "MMMM", "%B");
-        StringUtils::Replace(result, "D", "%d");
-        StringUtils::Replace(result, "YYYY", "%Y");
-        }
-        else if (StringUtils::CompareNoCase(id, "dateshort") == 0)
+      }
+      else if (StringUtils::CompareNoCase(id, "dateshortraw") == 0)
+      {
+        result = g_langInfo.GetDateFormat(false);
+      }
+      else if (StringUtils::CompareNoCase(id, "timeraw") == 0)
+      {
+        result = g_langInfo.GetTimeFormat();
+      }
+      else if (StringUtils::CompareNoCase(id, "speedunit") == 0)
+      {
+        result = g_langInfo.GetSpeedUnitString();
+      }
+      else if (StringUtils::CompareNoCase(id, "time") == 0)
+      {
+        result = g_langInfo.GetTimeFormat();
+        if (StringUtils::StartsWith(result, "HH"))
         {
-          result = g_langInfo.GetDateFormat(false);
-          StringUtils::Replace(result, "MM", "%m");
-          StringUtils::Replace(result, "DD", "%d");
-#ifdef TARGET_WINDOWS
-          StringUtils::Replace(result, "M", "%#m");
-          StringUtils::Replace(result, "D", "%#d");
-#else
-          StringUtils::Replace(result, "M", "%-m");
-          StringUtils::Replace(result, "D", "%-d");
-#endif
-          StringUtils::Replace(result, "YYYY", "%Y");
+          StringUtils::Replace(result, "HH", "%H");
         }
-        else if (StringUtils::CompareNoCase(id, "tempunit") == 0)
-          result = g_langInfo.GetTemperatureUnitString();
-        else if (StringUtils::CompareNoCase(id, "speedunit") == 0)
-          result = g_langInfo.GetSpeedUnitString();
-        else if (StringUtils::CompareNoCase(id, "time") == 0)
+        else
         {
-          result = g_langInfo.GetTimeFormat();
-          if (StringUtils::StartsWith(result, "HH"))
-            StringUtils::Replace(result, "HH", "%H");
-          else
-            StringUtils::Replace(result, "H", "%H");
+          StringUtils::Replace(result, "H", "%H");
+          StringUtils::Replace(result, "hh", "%I");
           StringUtils::Replace(result, "h", "%I");
-          StringUtils::Replace(result, "mm", "%M");
-          StringUtils::Replace(result, "ss", "%S");
-          StringUtils::Replace(result, "xx", "%p");
         }
-        else if (StringUtils::CompareNoCase(id, "meridiem") == 0)
-          result = StringUtils::Format("{}/{}", g_langInfo.GetMeridiemSymbol(MeridiemSymbolAM),
-                                       g_langInfo.GetMeridiemSymbol(MeridiemSymbolPM));
-
-        return result;
+        StringUtils::Replace(result, "mm", "%M");
+        StringUtils::Replace(result, "m", "%M");
+        StringUtils::Replace(result, "ss", "%S");
+        StringUtils::Replace(result, "s", "%S");
+        StringUtils::Replace(result, "xx", "%p");
+      }
+      else if (StringUtils::CompareNoCase(id, "meridiem") == 0)
+      {
+        result = StringUtils::Format("{}/{}", g_langInfo.GetMeridiemSymbol(MeridiemSymbolAM),
+                                     g_langInfo.GetMeridiemSymbol(MeridiemSymbolPM));
+      }
+#ifdef TARGET_WINDOWS
+      StringUtils::Replace(result, "%-", "%#"); //Convert to Windows format if required.
+#endif
+      return result;
     }
 
     //! @todo Add a mediaType enum
@@ -552,8 +576,14 @@ namespace XBMCAddon
       return CNetworkServices::ES_ZEROCONF;
     }
 
-    int getPLAYLIST_MUSIC() { return PLAYLIST_MUSIC; }
-    int getPLAYLIST_VIDEO() { return PLAYLIST_VIDEO; }
+    int getPLAYLIST_MUSIC()
+    {
+      return PLAYLIST::TYPE_MUSIC;
+    }
+    int getPLAYLIST_VIDEO()
+    {
+      return PLAYLIST::TYPE_VIDEO;
+    }
     int getTRAY_OPEN()
     {
       return static_cast<int>(TrayState::OPEN);

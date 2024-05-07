@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2017-2018 Team Kodi
+ *  Copyright (C) 2017-2024 Team Kodi
  *  This file is part of Kodi - https://kodi.tv
  *
  *  SPDX-License-Identifier: GPL-2.0-or-later
@@ -8,6 +8,9 @@
 
 #include "PeripheralKeyboard.h"
 
+#include "games/GameServices.h"
+#include "games/controllers/Controller.h"
+#include "games/controllers/ControllerManager.h"
 #include "input/InputManager.h"
 #include "peripherals/Peripherals.h"
 
@@ -74,6 +77,14 @@ void CPeripheralKeyboard::UnregisterKeyboardDriverHandler(
 
   if (it != m_keyboardHandlers.end())
     m_keyboardHandlers.erase(it);
+}
+
+GAME::ControllerPtr CPeripheralKeyboard::ControllerProfile() const
+{
+  if (m_controllerProfile)
+    return m_controllerProfile;
+
+  return m_manager.GetControllerProfiles().GetDefaultKeyboard();
 }
 
 bool CPeripheralKeyboard::OnKeyPress(const CKey& key)

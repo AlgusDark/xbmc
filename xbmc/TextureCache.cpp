@@ -87,6 +87,9 @@ std::string CTextureCache::GetCachedImage(const std::string &image, CTextureDeta
   // lookup the item in the database
   if (GetCachedTexture(url, details))
   {
+    if (details.file.empty())
+      return {};
+
     if (trackUsage)
       IncrementUseCount(details);
     return GetCachedPath(details.file);
@@ -97,6 +100,7 @@ std::string CTextureCache::GetCachedImage(const std::string &image, CTextureDeta
 bool CTextureCache::CanCacheImageURL(const CURL &url)
 {
   return url.GetUserName().empty() || url.GetUserName() == "music" ||
+         url.GetUserName() == "video" || url.GetUserName() == "picturefolder" ||
          StringUtils::StartsWith(url.GetUserName(), "video_") ||
          StringUtils::StartsWith(url.GetUserName(), "pvr") ||
          StringUtils::StartsWith(url.GetUserName(), "epg");
@@ -128,6 +132,18 @@ void CTextureCache::BackgroundCacheImage(const std::string &url)
 
   // needs (re)caching
   AddJob(new CTextureCacheJob(path, details.hash));
+}
+
+bool CTextureCache::StartCacheImage(const std::string& image)
+{
+  std::unique_lock<CCriticalSection> lock(m_processingSection);
+  std::set<std::string>::iterator i = m_processinglist.find(image);
+  if (i == m_processinglist.end())
+  {
+    m_processinglist.insert(image);
+    return true;
+  }
+  return false;
 }
 
 std::string CTextureCache::CacheImage(const std::string& image,
@@ -191,9 +207,10 @@ bool CTextureCache::CacheImage(const std::string &image, CTextureDetails &detail
   return !path.empty();
 }
 
-void CTextureCache::ClearCachedImage(const std::string &url, bool deleteSource /*= false */)
+void CTextureCache::ClearCachedImage(const std::string& image, bool deleteSource /*= false */)
 {
   //! @todo This can be removed when the texture cache covers everything.
+  const std::string url = CTextureUtils::UnwrapImageURL(image);
   std::string path = deleteSource ? url : "";
   std::string cachedFile;
   if (ClearCachedTexture(url, cachedFile))
@@ -283,7 +300,7 @@ void CTextureCache::OnCachingComplete(bool success, CTextureCacheJob *job)
 {
   if (success)
   {
-    if (job->m_oldHash == job->m_details.hash)
+    if (job->m_details.hashRevalidated)
       SetCachedTextureValid(job->m_url, job->m_details.updateable);
     else
       AddCachedTexture(job->m_url, job->m_details);
@@ -304,26 +321,6 @@ void CTextureCache::OnJobComplete(unsigned int jobID, bool success, CJob *job)
   if (strcmp(job->GetType(), kJobTypeCacheImage) == 0)
     OnCachingComplete(success, static_cast<CTextureCacheJob*>(job));
   return CJobQueue::OnJobComplete(jobID, success, job);
-}
-
-void CTextureCache::OnJobProgress(unsigned int jobID, unsigned int progress, unsigned int total, const CJob *job)
-{
-  if (strcmp(job->GetType(), kJobTypeCacheImage) == 0 && !progress)
-  { // check our processing list
-    {
-      std::unique_lock<CCriticalSection> lock(m_processingSection);
-      const CTextureCacheJob *cacheJob = static_cast<const CTextureCacheJob*>(job);
-      std::set<std::string>::iterator i = m_processinglist.find(cacheJob->m_url);
-      if (i == m_processinglist.end())
-      {
-        m_processinglist.insert(cacheJob->m_url);
-        return;
-      }
-    }
-    CancelJob(job);
-  }
-  else
-    CJobQueue::OnJobProgress(jobID, progress, total, job);
 }
 
 bool CTextureCache::Export(const std::string &image, const std::string &destination, bool overwrite)

@@ -11,10 +11,11 @@
 #include "ServiceBroker.h"
 #include "addons/AddonManager.h"
 #include "addons/Skin.h"
+#include "addons/addoninfo/AddonType.h"
 #include "cores/AudioEngine/Interfaces/AE.h"
 #include "filesystem/Directory.h"
-#include "input/Key.h"
 #include "input/WindowTranslator.h"
+#include "input/actions/Action.h"
 #include "input/actions/ActionIDs.h"
 #include "input/actions/ActionTranslator.h"
 #include "settings/Settings.h"
@@ -26,10 +27,11 @@
 
 #include <mutex>
 
-CGUIAudioManager::CGUIAudioManager()
-{
-  m_settings = CServiceBroker::GetSettingsComponent()->GetSettings();
+using namespace KODI;
 
+CGUIAudioManager::CGUIAudioManager()
+  : m_settings(CServiceBroker::GetSettingsComponent()->GetSettings())
+{
   m_bEnabled = false;
 
   m_settings->RegisterCallback(this, {CSettings::SETTING_LOOKANDFEEL_SOUNDSKIN,
@@ -211,7 +213,7 @@ std::string GetSoundSkinPath()
     return "";
 
   ADDON::AddonPtr addon;
-  if (!CServiceBroker::GetAddonMgr().GetAddon(value, addon, ADDON::ADDON_RESOURCE_UISOUNDS,
+  if (!CServiceBroker::GetAddonMgr().GetAddon(value, addon, ADDON::AddonType::RESOURCE_UISOUNDS,
                                               ADDON::OnlyEnabled::CHOICE_YES))
   {
     CLog::Log(LOGINFO, "Unknown sounds addon '{}'. Setting default sounds.", value);
@@ -266,7 +268,7 @@ bool CGUIAudioManager::Load()
       unsigned int id = ACTION_NONE;    // action identity
       if (pIdNode && pIdNode->FirstChild())
       {
-        CActionTranslator::TranslateString(pIdNode->FirstChild()->Value(), id);
+        ACTION::CActionTranslator::TranslateString(pIdNode->FirstChild()->Value(), id);
       }
 
       TiXmlNode* pFileNode = pAction->FirstChild("file");

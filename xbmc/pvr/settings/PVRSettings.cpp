@@ -12,7 +12,7 @@
 #include "guilib/LocalizeStrings.h"
 #include "pvr/PVRManager.h"
 #include "pvr/addons/PVRClients.h"
-#include "pvr/guilib/PVRGUIActions.h"
+#include "pvr/guilib/PVRGUIActionsParentalControl.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "settings/lib/SettingsManager.h"
@@ -172,9 +172,8 @@ void CPVRSettings::MarginTimeFiller(const SettingConstPtr& /*setting*/,
 {
   list.clear();
 
-  static const int marginTimeValues[] =
-  {
-    0, 1, 3, 5, 10, 15, 20, 30, 60, 90, 120, 180 // minutes
+  static const int marginTimeValues[] = {
+      0, 1, 2, 3, 5, 10, 15, 20, 30, 60, 90, 120, 180 // minutes
   };
 
   for (int iValue : marginTimeValues)
@@ -227,5 +226,6 @@ bool CPVRSettings::CheckParentalPin(const std::string& condition,
                                     const std::shared_ptr<const CSetting>& setting,
                                     void* data)
 {
-  return CServiceBroker::GetPVRManager().GUIActions()->CheckParentalPIN() == ParentalCheckResult::SUCCESS;
+  return CServiceBroker::GetPVRManager().Get<PVR::GUI::Parental>().CheckParentalPIN() ==
+         ParentalCheckResult::SUCCESS;
 }

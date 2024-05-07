@@ -14,6 +14,7 @@
 #include "threads/Event.h"
 
 #include <atomic>
+#include <memory>
 #include <string>
 
 class CURL;
@@ -29,6 +30,7 @@ public:
   CPluginDirectory();
   ~CPluginDirectory(void) override;
   bool GetDirectory(const CURL& url, CFileItemList& items) override;
+  bool Resolve(CFileItem& item) const override;
   bool AllowAll() const override { return true; }
   bool Exists(const CURL& url) override { return true; }
   float GetProgress() const override;
@@ -78,8 +80,8 @@ protected:
 private:
   bool StartScript(const std::string& strPath, bool resume);
 
-  CFileItemList* m_listItems;
-  CFileItem* m_fileResult;
+  std::unique_ptr<CFileItemList> m_listItems;
+  std::unique_ptr<CFileItem> m_fileResult;
 
   std::atomic<bool> m_cancelled;
   bool m_success = false; // set by script in EndOfDirectory

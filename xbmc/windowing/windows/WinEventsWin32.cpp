@@ -9,39 +9,45 @@
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
-#include <dbt.h>
-#include <math.h>
-#include <Shlobj.h>
-#include <Windowsx.h>
+#include "WinEventsWin32.h"
 
-#include "Application.h"
-#include "AppInboundProtocol.h"
+#include "ServiceBroker.h"
+#include "Util.h"
+#include "WinKeyMap.h"
+#include "application/AppInboundProtocol.h"
+#include "application/Application.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPowerHandling.h"
 #include "guilib/GUIComponent.h"
-#include "guilib/GUIControl.h"       // for EVENT_RESULT
+#include "guilib/GUIControl.h" // for EVENT_RESULT
 #include "guilib/GUIWindowManager.h"
+#include "input/InputManager.h"
+#include "input/actions/Action.h"
+#include "input/keyboard/Key.h"
+#include "input/keyboard/KeyIDs.h"
 #include "input/mouse/MouseStat.h"
 #include "input/touch/generic/GenericTouchActionHandler.h"
 #include "input/touch/generic/GenericTouchSwipeDetector.h"
-#include "input/InputManager.h"
 #include "messaging/ApplicationMessenger.h"
 #include "network/Zeroconf.h"
 #include "network/ZeroconfBrowser.h"
+#include "peripherals/Peripherals.h"
+#include "rendering/dx/RenderContext.h"
+#include "storage/MediaManager.h"
+#include "utils/JobManager.h"
+#include "utils/StringUtils.h"
+#include "utils/log.h"
+
 #include "platform/win32/CharsetConverter.h"
+#include "platform/win32/WIN32Util.h"
 #include "platform/win32/powermanagement/Win32PowerSyscall.h"
 #include "platform/win32/storage/Win32StorageProvider.h"
-#include "platform/win32/WIN32Util.h"
-#include "peripherals/Peripherals.h"
-#include "ServiceBroker.h"
-#include "storage/MediaManager.h"
-#include "Util.h"
-#include "utils/JobManager.h"
-#include "utils/log.h"
-#include "utils/StringUtils.h"
-#include "rendering/dx/RenderContext.h"
-#include "WinKeyMap.h"
-#include "WinEventsWin32.h"
 
 #include <array>
+#include <math.h>
+
+#include <Shlobj.h>
+#include <dbt.h>
 
 HWND g_hWnd = nullptr;
 
@@ -50,6 +56,9 @@ HWND g_hWnd = nullptr;
 #endif
 
 #define ROTATE_ANGLE_DEGREE(arg) GID_ROTATE_ANGLE_FROM_ARGUMENT(LODWORD(arg)) * 180 / M_PI
+
+#define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
+#define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
 
 /* Masks for processing the windows KEYDOWN and KEYUP messages */
 #define REPEATED_KEYMASK  (1<<30)
@@ -65,8 +74,6 @@ int g_sizeMoveWidth = 0;
 int g_sizeMoveHight = 0;
 int g_sizeMoveX = -10000;
 int g_sizeMoveY = -10000;
-
-int XBMC_TranslateUNICODE = 1;
 
 int CWinEventsWin32::m_originalZoomDistance = 0;
 Pointer CWinEventsWin32::m_touchPointer;
@@ -161,9 +168,13 @@ static XBMC_keysym *TranslateKey(WPARAM vkey, UINT scancode, XBMC_keysym *keysym
   }
 
   // Attempt to convert the keypress to a UNICODE character
-  GetKeyboardState(keystate);
+  if (GetKeyboardState(keystate) == FALSE)
+  {
+    CLog::LogF(LOGERROR, "GetKeyboardState error {}", GetLastError());
+    return keysym;
+  }
 
-  if (pressed && XBMC_TranslateUNICODE)
+  if (pressed)
   {
     std::array<uint16_t, 2> wchars;
 
@@ -174,7 +185,8 @@ static XBMC_keysym *TranslateKey(WPARAM vkey, UINT scancode, XBMC_keysym *keysym
       keysym->unicode = static_cast<uint16_t>(vkey - VK_NUMPAD0 + '0');
     }
     else if (ToUnicode(static_cast<UINT>(vkey), scancode, keystate,
-                       reinterpret_cast<LPWSTR>(wchars.data()), wchars.size(), 0) > 0)
+                       reinterpret_cast<LPWSTR>(wchars.data()), static_cast<int>(wchars.size()),
+                       0) > 0)
     {
       keysym->unicode = wchars[0];
     }
@@ -228,18 +240,6 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
   XBMC_Event newEvent = {};
   static HDEVNOTIFY hDeviceNotify;
 
-#if 0
-  if (uMsg == WM_NCCREATE)
-  {
-    // if available, enable DPI scaling of non-client portion of window (title bar, etc.)
-    if (g_Windowing.PtrEnableNonClientDpiScaling != NULL)
-    {
-      g_Windowing.PtrEnableNonClientDpiScaling(hWnd);
-    }
-    return DefWindowProc(hWnd, uMsg, wParam, lParam);
-  }
-#endif
-
   if (uMsg == WM_CREATE)
   {
     g_hWnd = hWnd;
@@ -283,11 +283,13 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       break;
     case WM_SHOWWINDOW:
       {
-        bool active = g_application.GetRenderGUI();
+        const auto& components = CServiceBroker::GetAppComponents();
+        const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+        bool active = appPower->GetRenderGUI();
         if (appPort)
           appPort->SetRenderGUI(wParam != 0);
-        if (g_application.GetRenderGUI() != active)
-          DX::Windowing()->NotifyAppActiveChange(g_application.GetRenderGUI());
+        if (appPower->GetRenderGUI() != active)
+          DX::Windowing()->NotifyAppActiveChange(appPower->GetRenderGUI());
         CLog::LogFC(LOGDEBUG, LOGWINDOWING, "WM_SHOWWINDOW -> window is {}",
                     wParam != 0 ? "shown" : "hidden");
       }
@@ -296,7 +298,9 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       {
         CLog::LogFC(LOGDEBUG, LOGWINDOWING, "WM_ACTIVATE -> window is {}",
                     LOWORD(wParam) != WA_INACTIVE ? "active" : "inactive");
-        bool active = g_application.GetRenderGUI();
+        const auto& components = CServiceBroker::GetAppComponents();
+        const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+        bool active = appPower->GetRenderGUI();
         if (HIWORD(wParam))
         {
           if (appPort)
@@ -319,10 +323,10 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
           }
         }
-        if (g_application.GetRenderGUI() != active)
-          DX::Windowing()->NotifyAppActiveChange(g_application.GetRenderGUI());
+        if (appPower->GetRenderGUI() != active)
+          DX::Windowing()->NotifyAppActiveChange(appPower->GetRenderGUI());
         CLog::LogFC(LOGDEBUG, LOGWINDOWING, "window is {}",
-                    g_application.GetRenderGUI() ? "active" : "inactive");
+                    appPower->GetRenderGUI() ? "active" : "inactive");
       }
       break;
     case WM_SETFOCUS:
@@ -365,7 +369,7 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
           return 0;
         default:;
       }
-      //deliberate fallthrough
+      [[fallthrough]];
     case WM_KEYDOWN:
     {
       switch (wParam)
@@ -450,11 +454,13 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       CLog::LogFC(LOGDEBUG, LOGWINDOWING, "APPCOMMAND {}", appcmd);
 
       // Reset the screen saver
-      g_application.ResetScreenSaver();
+      auto& components = CServiceBroker::GetAppComponents();
+      const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+      appPower->ResetScreenSaver();
 
       // If we were currently in the screen saver wake up and don't process the
       // appcommand
-      if (g_application.WakeUpScreenSaverAndDPMS())
+      if (appPower->WakeUpScreenSaverAndDPMS())
         return true;
 
       // Retrieve the action associated with this appcommand from the mapping table
@@ -561,12 +567,19 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       return(0);
     }
     case WM_DISPLAYCHANGE:
+    {
       CLog::LogFC(LOGDEBUG, LOGWINDOWING, "display change event");
-      if (g_application.GetRenderGUI() && !DX::Windowing()->IsAlteringWindow() && GET_X_LPARAM(lParam) > 0 && GET_Y_LPARAM(lParam) > 0)
+      if (DX::Windowing()->IsTogglingHDR() || DX::Windowing()->IsAlteringWindow())
+        return (0);
+
+      const auto& components = CServiceBroker::GetAppComponents();
+      const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+      if (appPower->GetRenderGUI() && GET_X_LPARAM(lParam) > 0 && GET_Y_LPARAM(lParam) > 0)
       {
         DX::Windowing()->UpdateResolutions();
       }
       return(0);
+    }
     case WM_ENTERSIZEMOVE:
       {
         DX::Windowing()->SetSizeMoveMode(true);
@@ -585,7 +598,9 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
           // tell the device about new position
           DX::Windowing()->OnMove(newEvent.move.x, newEvent.move.y);
           // tell the application about new position
-          if (g_application.GetRenderGUI() && !DX::Windowing()->IsAlteringWindow())
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+          if (appPower->GetRenderGUI() && !DX::Windowing()->IsAlteringWindow())
           {
             if (appPort)
               appPort->OnEvent(newEvent);
@@ -601,7 +616,10 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
           // tell the device about new size
           DX::Windowing()->OnResize(newEvent.resize.w, newEvent.resize.h);
           // tell the application about new size
-          if (g_application.GetRenderGUI() && !DX::Windowing()->IsAlteringWindow() && newEvent.resize.w > 0 && newEvent.resize.h > 0)
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+          if (appPower->GetRenderGUI() && !DX::Windowing()->IsAlteringWindow() &&
+              newEvent.resize.w > 0 && newEvent.resize.h > 0)
           {
             if (appPort)
               appPort->OnEvent(newEvent);
@@ -615,7 +633,9 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         if (!DX::Windowing()->IsMinimized())
         {
           DX::Windowing()->SetMinimized(true);
-          if (!g_application.GetRenderGUI())
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+          if (appPower->GetRenderGUI())
           {
             if (appPort)
               appPort->SetRenderGUI(false);
@@ -625,7 +645,9 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       else if (DX::Windowing()->IsMinimized())
       {
         DX::Windowing()->SetMinimized(false);
-        if (!g_application.GetRenderGUI())
+        const auto& components = CServiceBroker::GetAppComponents();
+        const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+        if (!appPower->GetRenderGUI())
         {
           if (appPort)
             appPort->SetRenderGUI(true);
@@ -658,7 +680,10 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
           // tell device about new size
           DX::Windowing()->OnResize(newEvent.resize.w, newEvent.resize.h);
           // tell application about size changes
-          if (g_application.GetRenderGUI() && !DX::Windowing()->IsAlteringWindow() && newEvent.resize.w > 0 && newEvent.resize.h > 0)
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+          if (appPower->GetRenderGUI() && !DX::Windowing()->IsAlteringWindow() &&
+              newEvent.resize.w > 0 && newEvent.resize.h > 0)
           {
             if (appPort)
               appPort->OnEvent(newEvent);
@@ -685,7 +710,9 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 
           // tell the device about new position
           DX::Windowing()->OnMove(newEvent.move.x, newEvent.move.y);
-          if (g_application.GetRenderGUI() && !DX::Windowing()->IsAlteringWindow())
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+          if (appPower->GetRenderGUI() && !DX::Windowing()->IsAlteringWindow())
           {
             if (appPort)
               appPort->OnEvent(newEvent);
@@ -787,6 +814,7 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
               else
                 CWin32StorageProvider::SetEvent();
             }
+            break;
           default:;
         }
         break;
@@ -812,7 +840,9 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         case WM_LBUTTONDBLCLK:
         {
           DX::Windowing()->SetMinimized(false);
-          if (!g_application.GetRenderGUI())
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+          if (!appPower->GetRenderGUI())
           {
             if (appPort)
               appPort->SetRenderGUI(true);
@@ -822,7 +852,30 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
       }
       break;
     }
-    default:;
+    case WM_TIMER:
+    {
+      if (wParam == ID_TIMER_HDR)
+      {
+        CLog::LogFC(LOGDEBUG, LOGWINDOWING, "finish toggling HDR event");
+        DX::Windowing()->SetTogglingHDR(false);
+        KillTimer(hWnd, wParam);
+      }
+      break;
+    }
+    case WM_INITMENU:
+    {
+      HMENU hm = GetSystemMenu(hWnd, FALSE);
+      if (hm)
+      {
+        if (DX::Windowing()->IsFullScreen())
+          EnableMenuItem(hm, SC_MOVE, MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
+        else
+          EnableMenuItem(hm, SC_MOVE, MF_BYCOMMAND | MF_ENABLED);
+      }
+      break;
+    }
+    default:
+      break;
   }
   return(DefWindowProc(hWnd, uMsg, wParam, lParam));
 }
@@ -898,18 +951,14 @@ void CWinEventsWin32::OnGestureNotify(HWND hWnd, LPARAM lParam)
     gc[1].dwBlock = gc[1].dwWant ^ 0x01;
     gc[2].dwBlock = gc[2].dwWant ^ 0x1F;
   }
-  if (DX::Windowing()->PtrSetGestureConfig)
-    DX::Windowing()->PtrSetGestureConfig(hWnd, 0, 5, gc, sizeof(GESTURECONFIG));
+  SetGestureConfig(hWnd, 0, 5, gc, sizeof(GESTURECONFIG));
 }
 
 void CWinEventsWin32::OnGesture(HWND hWnd, LPARAM lParam)
 {
-  if (!DX::Windowing()->PtrGetGestureInfo)
-    return;
-
   GESTUREINFO gi = {};
   gi.cbSize = sizeof(gi);
-  DX::Windowing()->PtrGetGestureInfo(reinterpret_cast<HGESTUREINFO>(lParam), &gi);
+  GetGestureInfo(reinterpret_cast<HGESTUREINFO>(lParam), &gi);
 
   // convert to window coordinates
   POINT point = { gi.ptsLocation.x, gi.ptsLocation.y };
@@ -1012,6 +1061,5 @@ void CWinEventsWin32::OnGesture(HWND hWnd, LPARAM lParam)
     // You have encountered an unknown gesture
     break;
   }
-  if(DX::Windowing()->PtrCloseGestureInfoHandle)
-    DX::Windowing()->PtrCloseGestureInfoHandle(reinterpret_cast<HGESTUREINFO>(lParam));
+  CloseGestureInfoHandle(reinterpret_cast<HGESTUREINFO>(lParam));
 }

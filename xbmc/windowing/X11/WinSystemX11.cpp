@@ -26,6 +26,7 @@
 #include "utils/log.h"
 #include "windowing/GraphicContext.h"
 
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -42,12 +43,9 @@ using namespace std::chrono_literals;
 CWinSystemX11::CWinSystemX11() : CWinSystemBase()
 {
   m_dpy = NULL;
-  m_glWindow = 0;
-  m_mainWindow = 0;
   m_bWasFullScreenBeforeMinimize = false;
   m_minimized = false;
   m_bIgnoreNextFocusMessage = false;
-  m_invisibleCursor = 0;
   m_bIsInternalXrr = false;
   m_delayDispReset = false;
 
@@ -499,7 +497,7 @@ std::unique_ptr<KODI::WINDOWING::IOSScreenSaver> CWinSystemX11::GetOSScreenSaver
   std::unique_ptr<IOSScreenSaver> ret;
   if (m_dpy)
   {
-    ret.reset(new COSScreenSaverX11(m_dpy));
+    ret = std::make_unique<COSScreenSaverX11>(m_dpy);
   }
   return ret;
 }
@@ -767,7 +765,7 @@ bool CWinSystemX11::SetWindow(int width, int height, bool fullscreen, const std:
       Atom fs = XInternAtom(m_dpy, "_NET_WM_STATE_FULLSCREEN", True);
       XChangeProperty(m_dpy, m_mainWindow, XInternAtom(m_dpy, "_NET_WM_STATE", True), XA_ATOM, 32, PropModeReplace, (unsigned char *) &fs, 1);
       // disable desktop compositing for KDE, when Kodi is in full-screen mode
-      int one = 1;
+      long one = 1;
       Atom composite = XInternAtom(m_dpy, "_KDE_NET_WM_BLOCK_COMPOSITING", True);
       if (composite != None)
       {
@@ -848,6 +846,8 @@ bool CWinSystemX11::SetWindow(int width, int height, bool fullscreen, const std:
                             class_hints);
       XFree(class_hints);
       XFree(wm_hints);
+      XFree(iconName.value);
+      XFree(windowName.value);
 
       // register interest in the delete window message
       Atom wmDeleteMessage = XInternAtom(m_dpy, "WM_DELETE_WINDOW", False);
@@ -1048,7 +1048,10 @@ bool CWinSystemX11::HasWindowManager()
 
   if(status == Success && items_read)
   {
-    CLog::Log(LOGDEBUG, "Window Manager Name: {}", data);
+    const char* s;
+
+    s = reinterpret_cast<const char*>(data);
+    CLog::Log(LOGDEBUG, "Window Manager Name: {}", s);
   }
   else
     CLog::Log(LOGDEBUG,"Window Manager Name: ");

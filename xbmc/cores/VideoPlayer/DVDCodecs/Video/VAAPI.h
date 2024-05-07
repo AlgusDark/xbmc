@@ -241,7 +241,7 @@ struct CVaapiProcessedPicture
   AVFrame *frame;
   int id;
   CPostproc *source = nullptr;
-  bool crop;
+  bool crop = false;
 };
 
 class CVaapiRenderPicture : public CVideoBuffer
@@ -356,7 +356,7 @@ protected:
   CDecoder &m_vaapi;
 
   // extended state variables for state machine
-  int m_extTimeout;
+  std::chrono::milliseconds m_extTimeout = std::chrono::milliseconds::zero();
   /// \brief Whether at least one interlaced frame was encountered in the video stream (indicating that more interlaced frames could potentially follow)
   bool m_seenInterlaced;
   CVaapiConfig m_config;
@@ -419,7 +419,7 @@ private:
   void SetValidDRMVaDisplayFromRenderNode();
   static CVAAPIContext *m_context;
   static CCriticalSection m_section;
-  VADisplay m_display;
+  VADisplay m_display = NULL;
   int m_refCount;
   int m_profileCount;
   VAProfile *m_profiles;
@@ -497,7 +497,6 @@ protected:
   bool m_vaapiConfigured;
   CVaapiConfig  m_vaapiConfig;
   CVideoSurfaces m_videoSurfaces;
-  AVCodecContext* m_avctx;
   int m_getBufferError;
 
   COutput m_vaapiOutput;
@@ -510,6 +509,14 @@ protected:
 
   static bool m_capGeneral;
   static bool m_capDeepColor;
+
+private:
+  struct AVBufferRefDeleter
+  {
+    void operator()(AVBufferRef* p) const;
+  };
+
+  std::unique_ptr<AVBufferRef, AVBufferRefDeleter> m_deviceRef;
 };
 
 //-----------------------------------------------------------------------------
@@ -587,11 +594,11 @@ protected:
   bool CheckSuccess(VAStatus status, const std::string& function);
   void Dispose();
   void Advance();
-  VAConfigID m_configId;
-  VAContextID m_contextId;
+  VAConfigID m_configId = VA_INVALID_ID;
+  VAContextID m_contextId = VA_INVALID_ID;
   CVideoSurfaces m_videoSurfaces;
   std::deque<CVaapiDecodedPicture> m_decodedPics;
-  VABufferID m_filter;
+  VABufferID m_filter = VA_INVALID_ID;
   int m_forwardRefs, m_backwardRefs;
   int m_currentIdx;
   int m_frameCount;

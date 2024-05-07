@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "GUIFont.h"
 #include "utils/ColorUtils.h"
 #include "utils/Geometry.h"
 
@@ -74,7 +75,10 @@ struct SVertex
 
 class CGUIFontTTF
 {
-  static constexpr size_t LOOKUPTABLE_SIZE = 256 * 8;
+  // use lookup table for the first 4096 glyphs (almost any letter or symbol) to
+  // speed up GUI rendering and decrease CPU usage and less memory reallocations
+  static constexpr int MAX_GLYPH_IDX = 4096;
+  static constexpr size_t LOOKUPTABLE_SIZE = MAX_GLYPH_IDX * FONT_STYLES_COUNT;
 
   friend class CGUIFont;
 
@@ -106,19 +110,15 @@ public:
 protected:
   explicit CGUIFontTTF(const std::string& fontIdent);
 
-
   struct Glyph
   {
-    hb_glyph_info_t m_glyphInfo;
-    hb_glyph_position_t m_glyphPosition;
+    hb_glyph_info_t m_glyphInfo{};
+    hb_glyph_position_t m_glyphPosition{};
 
-    // converter for harfbuzz library
-    Glyph(hb_glyph_info_t gInfo, hb_glyph_position_t gPos)
+    Glyph(const hb_glyph_info_t& glyphInfo, const hb_glyph_position_t& glyphPosition)
+      : m_glyphInfo(glyphInfo), m_glyphPosition(glyphPosition)
     {
-      m_glyphInfo = gInfo;
-      m_glyphPosition = gPos;
     }
-    Glyph() {}
   };
 
   struct Character
@@ -132,7 +132,6 @@ protected:
     float m_advance;
     FT_UInt m_glyphIndex;
     character_t m_glyphAndStyle;
-    wchar_t m_letter;
   };
 
   struct RunInfo
@@ -151,7 +150,7 @@ protected:
   std::vector<Glyph> GetHarfBuzzShapedGlyphs(const vecText& text);
 
   float GetTextWidthInternal(const vecText& text);
-  float GetTextWidthInternal(const vecText& text, std::vector<Glyph>& glyph);
+  float GetTextWidthInternal(const vecText& text, const std::vector<Glyph>& glyph);
   float GetCharWidthInternal(character_t ch);
   float GetTextHeight(float lineSpacing, int numLines) const;
   float GetTextBaseLine() const { return static_cast<float>(m_cellBaseLine); }
@@ -165,13 +164,15 @@ protected:
                         const vecText& text,
                         uint32_t alignment,
                         float maxPixelWidth,
-                        bool scrolling);
+                        bool scrolling,
+                        float dx = 0.0f,
+                        float dy = 0.0f);
 
   float m_height{0.0f};
 
   // Stuff for pre-rendering for speed
   Character* GetCharacter(character_t letter, FT_UInt glyphIndex);
-  bool CacheCharacter(wchar_t letter, uint32_t style, Character* ch, FT_UInt glyphIndex);
+  bool CacheCharacter(FT_UInt glyphIndex, uint32_t style, Character* ch);
   void RenderCharacter(CGraphicContext& context,
                        float posX,
                        float posY,
@@ -205,18 +206,21 @@ protected:
    Accounts for spacing between lines to avoid characters overlapping.
    */
   unsigned int GetTextureLineHeight() const;
+  unsigned int GetMaxFontHeight() const;
 
   UTILS::COLOR::Color m_color{UTILS::COLOR::NONE};
 
-  Character* m_char{nullptr}; // our characters
-  Character* m_charquick[LOOKUPTABLE_SIZE]{nullptr}; // ascii chars (7 styles) here
-  int m_maxChars{0}; // size of character array (can be incremented)
-  int m_numChars{0}; // the current number of cached characters
+  std::vector<Character> m_char; // our characters
 
+  // room for the first MAX_GLYPH_IDX glyphs in 7 styles
+  Character* m_charquick[LOOKUPTABLE_SIZE]{nullptr};
+
+  bool m_ellipseCached{false};
   float m_ellipsesWidth{0.0f}; // this is used every character (width of '.')
 
   unsigned int m_cellBaseLine{0};
   unsigned int m_cellHeight{0};
+  unsigned int m_maxFontHeight{0};
 
   unsigned int m_nestedBeginCount{0}; // speedups
 
@@ -236,16 +240,22 @@ protected:
     float m_translateX;
     float m_translateY;
     float m_translateZ;
+    float m_offsetX; // skews the "raw" mesh before applying UI matrix (useful for scrolling)
+    float m_offsetY;
     const CVertexBuffer* m_vertexBuffer;
     CRect m_clip;
     CTranslatedVertices(float translateX,
                         float translateY,
                         float translateZ,
                         const CVertexBuffer* vertexBuffer,
-                        const CRect& clip)
+                        const CRect& clip,
+                        float offsetX = 0.0f,
+                        float offsetY = 0.0f)
       : m_translateX(translateX),
         m_translateY(translateY),
         m_translateZ(translateZ),
+        m_offsetX(offsetX),
+        m_offsetY(offsetY),
         m_vertexBuffer(vertexBuffer),
         m_clip(clip)
     {

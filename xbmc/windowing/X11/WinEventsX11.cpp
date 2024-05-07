@@ -8,9 +8,9 @@
 
 #include "WinEventsX11.h"
 
-#include "AppInboundProtocol.h"
-#include "Application.h"
 #include "ServiceBroker.h"
+#include "application/AppInboundProtocol.h"
+#include "application/Application.h"
 #include "cores/AudioEngine/Interfaces/AE.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
@@ -329,7 +329,7 @@ bool CWinEventsX11::MessagePump()
       continue;
     }
 
-    if (XFilterEvent(&xevent, m_window))
+    if (XFilterEvent(&xevent, None))
       continue;
 
     switch (xevent.type)

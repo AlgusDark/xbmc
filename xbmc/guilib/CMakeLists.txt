@@ -66,6 +66,7 @@ set(SOURCES DDSImage.cpp
             TextureBundle.cpp
             TextureBundleXBT.cpp
             Texture.cpp
+            TextureBase.cpp
             TextureManager.cpp
             VisibleEffect.cpp
             XBTF.cpp
@@ -148,6 +149,7 @@ set(HEADERS DDSImage.h
             LocalizeStrings.h
             StereoscopicsManager.h
             Texture.h
+            TextureBase.h
             TextureBundle.h
             TextureBundleXBT.h
             TextureManager.h
@@ -157,22 +159,24 @@ set(HEADERS DDSImage.h
             XBTF.h
             XBTFReader.h)
 
-if(OPENGL_FOUND OR OPENGLES_FOUND)
-  list(APPEND SOURCES GUIFontTTFGL.cpp
-                      Shader.cpp
+if(TARGET OpenGL::GL OR TARGET OpenGL::GLES)
+  list(APPEND SOURCES Shader.cpp
                       TextureGL.cpp)
-  list(APPEND HEADERS GUIFontTTFGL.h
-                      Shader.h
+  list(APPEND HEADERS Shader.h
                       TextureGL.h)
 
-  if(OPENGL_FOUND)
-    list(APPEND SOURCES GUITextureGL.cpp)
-    list(APPEND HEADERS GUITextureGL.h)
+  if(TARGET OpenGL::GL)
+    list(APPEND SOURCES GUIFontTTFGL.cpp
+                        GUITextureGL.cpp)
+    list(APPEND HEADERS GUIFontTTFGL.h
+                        GUITextureGL.h)
   endif()
 
-  if(OPENGLES_FOUND)
-    list(APPEND SOURCES GUITextureGLES.cpp)
-    list(APPEND HEADERS GUITextureGLES.h)
+  if(TARGET OpenGL::GLES)
+    list(APPEND SOURCES GUIFontTTFGLES.cpp
+                        GUITextureGLES.cpp)
+    list(APPEND HEADERS GUIFontTTFGLES.h
+                        GUITextureGLES.h)
   endif()
 
 endif()
@@ -208,8 +212,9 @@ if(CORE_SYSTEM_NAME STREQUAL windows OR CORE_SYSTEM_NAME STREQUAL windowsstore)
   foreach(shader ${SHADERS_VERTEX})
     get_filename_component(file ${shader} NAME_WE)
     add_custom_command(OUTPUT ${file}.h
-                       COMMAND ${FXC} /Fh ${file}.h /E VS /T vs_4_0_level_9_1 /Vn ${file} /Qstrip_reflect
-                                      ${CMAKE_SOURCE_DIR}/system/shaders/${shader}
+                       COMMAND windows::FXC
+                       ARGS /Fh ${file}.h /E VS /T vs_4_0_level_9_1 /Vn ${file} /Qstrip_reflect
+                            ${CMAKE_SOURCE_DIR}/system/shaders/${shader}
                        DEPENDS ${CMAKE_SOURCE_DIR}/system/shaders/${shader}
                        COMMENT "FX compile vertex shader ${shader}"
                        VERBATIM)
@@ -218,8 +223,9 @@ if(CORE_SYSTEM_NAME STREQUAL windows OR CORE_SYSTEM_NAME STREQUAL windowsstore)
   foreach(shader ${SHADERS_PIXEL})
     get_filename_component(file ${shader} NAME_WE)
     add_custom_command(OUTPUT ${file}.h
-                       COMMAND ${FXC} /Fh ${file}.h /E PS /T ps_4_0_level_9_1 /Vn ${file} /Qstrip_reflect
-                                      ${CMAKE_SOURCE_DIR}/system/shaders/${shader}
+                       COMMAND windows::FXC
+                       ARGS /Fh ${file}.h /E PS /T ps_4_0_level_9_1 /Vn ${file} /Qstrip_reflect
+                            ${CMAKE_SOURCE_DIR}/system/shaders/${shader}
                        DEPENDS ${CMAKE_SOURCE_DIR}/system/shaders/${shader}
                        COMMENT "FX compile pixel shader ${shader}"
                        VERBATIM)

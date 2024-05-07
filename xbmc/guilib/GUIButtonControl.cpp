@@ -9,7 +9,11 @@
 #include "GUIButtonControl.h"
 
 #include "GUIFontManager.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "input/mouse/MouseEvent.h"
+
+using namespace KODI;
 
 CGUIButtonControl::CGUIButtonControl(int parentID,
                                      int controlID,
@@ -106,15 +110,27 @@ void CGUIButtonControl::Process(unsigned int currentTime, CDirtyRegionList &dirt
 
 void CGUIButtonControl::Render()
 {
-  m_imgFocus->Render();
-  m_imgNoFocus->Render();
+  if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
+      RENDER_ORDER_FRONT_TO_BACK)
+  {
+    m_imgNoFocus->Render();
+    m_imgFocus->Render(-1);
+  }
+  else
+  {
+    m_imgFocus->Render(-1);
+    m_imgNoFocus->Render();
+    RenderText();
+  }
 
-  RenderText();
   CGUIControl::Render();
 }
 
 void CGUIButtonControl::RenderText()
 {
+  if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
+      RENDER_ORDER_FRONT_TO_BACK)
+    return;
   m_label.Render();
   m_label2.Render();
 }
@@ -335,7 +351,7 @@ CRect CGUIButtonControl::CalcRenderRegion() const
   return buttonRect;
 }
 
-EVENT_RESULT CGUIButtonControl::OnMouseEvent(const CPoint &point, const CMouseEvent &event)
+EVENT_RESULT CGUIButtonControl::OnMouseEvent(const CPoint& point, const MOUSE::CMouseEvent& event)
 {
   if (event.m_id == ACTION_MOUSE_LEFT_CLICK)
   {

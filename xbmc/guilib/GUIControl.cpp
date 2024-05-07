@@ -17,11 +17,14 @@
 #include "GUIWindowManager.h"
 #include "ServiceBroker.h"
 #include "input/InputManager.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "input/mouse/MouseEvent.h"
 #include "input/mouse/MouseStat.h"
 #include "utils/log.h"
 
-using namespace KODI::GUILIB;
+using namespace KODI;
+using namespace GUILIB;
 
 CGUIControl::CGUIControl()
 {
@@ -125,6 +128,15 @@ void CGUIControl::DoProcess(unsigned int currentTime, CDirtyRegionList &dirtyreg
   if (Animate(currentTime))
     MarkDirtyRegion();
 
+  // if the control changed culling state from true to false, mark it
+  const bool culled = m_transform.alpha <= 0.01f;
+  if (m_isCulled != culled)
+  {
+    m_isCulled = false;
+    MarkDirtyRegion();
+  }
+  m_isCulled = culled;
+
   if (IsVisible())
   {
     m_cachedTransform = CServiceBroker::GetWinSystem()->GetGfxContext().AddTransform(m_transform);
@@ -168,7 +180,11 @@ void CGUIControl::Process(unsigned int currentTime, CDirtyRegionList &dirtyregio
 // 3. reset the animation transform
 void CGUIControl::DoRender()
 {
-  if (IsVisible())
+  if (IsControlRenderable() &&
+      !m_renderRegion.Intersects(CServiceBroker::GetWinSystem()->GetGfxContext().GetScissors()))
+    return;
+
+  if (IsVisible() && !m_isCulled)
   {
     bool hasStereo =
         m_stereo != 0.0f &&
@@ -402,7 +418,8 @@ bool CGUIControl::CanFocus() const
 
 bool CGUIControl::IsVisible() const
 {
-  if (m_forceHidden) return false;
+  if (m_forceHidden)
+    return false;
   return m_visible == VISIBLE;
 }
 
@@ -471,8 +488,16 @@ float CGUIControl::GetHeight() const
   return m_height;
 }
 
+void CGUIControl::AssignDepth()
+{
+  m_cachedTransform.depth = CServiceBroker::GetWinSystem()->GetGfxContext().GetDepth();
+}
+
 void CGUIControl::MarkDirtyRegion(const unsigned int dirtyState)
 {
+  // if the control is culled, bail
+  if (dirtyState == DIRTY_STATE_CONTROL && m_isCulled)
+    return;
   if (!m_controlDirtyState && m_parentControl)
     m_parentControl->MarkDirtyRegion(DIRTY_STATE_CHILD);
 
@@ -560,7 +585,7 @@ bool CGUIControl::HitTest(const CPoint &point) const
   return m_hitRect.PtInRect(point);
 }
 
-EVENT_RESULT CGUIControl::SendMouseEvent(const CPoint &point, const CMouseEvent &event)
+EVENT_RESULT CGUIControl::SendMouseEvent(const CPoint& point, const MOUSE::CMouseEvent& event)
 {
   CPoint childPoint(point);
   m_transform.InverseTransformPosition(childPoint.x, childPoint.y);
@@ -935,6 +960,24 @@ void CGUIControl::UpdateControlStats()
     ++m_controlStats->nCountTotal;
     if (IsVisible() && IsVisibleFromSkin())
       ++m_controlStats->nCountVisible;
+  }
+}
+
+bool CGUIControl::IsControlRenderable()
+{
+  switch (ControlType)
+  {
+    case GUICONTAINER_EPGGRID:
+    case GUICONTAINER_FIXEDLIST:
+    case GUICONTAINER_LIST:
+    case GUICONTAINER_PANEL:
+    case GUICONTAINER_WRAPLIST:
+    case GUICONTROL_GROUP:
+    case GUICONTROL_GROUPLIST:
+    case GUICONTROL_LISTGROUP:
+      return false;
+    default:
+      return true;
   }
 }
 

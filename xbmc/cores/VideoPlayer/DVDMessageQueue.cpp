@@ -20,7 +20,6 @@ using namespace std::chrono_literals;
 CDVDMessageQueue::CDVDMessageQueue(const std::string &owner) : m_hEvent(true), m_owner(owner)
 {
   m_iDataSize     = 0;
-  m_bAbortRequest = false;
   m_bInitialized = false;
 
   m_TimeBack = DVD_NOPTS_VALUE;
@@ -160,7 +159,7 @@ MsgQueueReturnCode CDVDMessageQueue::Put(const std::shared_ptr<CDVDMsg>& pMsg,
 }
 
 MsgQueueReturnCode CDVDMessageQueue::Get(std::shared_ptr<CDVDMsg>& pMsg,
-                                         unsigned int iTimeoutInMilliSeconds,
+                                         std::chrono::milliseconds timeout,
                                          int& priority)
 {
   std::unique_lock<CCriticalSection> lock(m_section);
@@ -198,7 +197,7 @@ MsgQueueReturnCode CDVDMessageQueue::Get(std::shared_ptr<CDVDMsg>& pMsg,
       ret = MSGQ_OK;
       break;
     }
-    else if (!iTimeoutInMilliSeconds)
+    else if (timeout == 0ms)
     {
       ret = MSGQ_TIMEOUT;
       break;
@@ -209,7 +208,7 @@ MsgQueueReturnCode CDVDMessageQueue::Get(std::shared_ptr<CDVDMsg>& pMsg,
       lock.unlock();
 
       // wait for a new message
-      if (!m_hEvent.Wait(std::chrono::milliseconds(iTimeoutInMilliSeconds)))
+      if (!m_hEvent.Wait(timeout))
         return MSGQ_TIMEOUT;
 
       lock.lock();

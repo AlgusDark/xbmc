@@ -9,17 +9,14 @@
 #pragma once
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "threads/CriticalSection.h"
 #include "utils/EventStream.h"
 
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
-
-enum class FavAction : int
-{
-  PLAYMEDIA,
-  SHOWPICTURE,
-};
 
 class CFavouritesService
 {
@@ -31,9 +28,11 @@ public:
   void ReInit(std::string userDataFolder);
 
   bool IsFavourited(const CFileItem& item, int contextWindow) const;
+  std::shared_ptr<CFileItem> GetFavourite(const CFileItem& item, int contextWindow) const;
+  std::shared_ptr<CFileItem> ResolveFavourite(const CFileItem& favItem) const;
+
+  int Size() const;
   void GetAll(CFileItemList& items) const;
-  std::string GetExecutePath(const CFileItem &item, int contextWindow) const;
-  std::string GetExecutePath(const CFileItem &item, const std::string &contextWindow) const;
   bool AddOrRemove(const CFileItem& item, int contextWindow);
   bool Save(const CFileItemList& items);
 
@@ -54,11 +53,10 @@ private:
 
   void OnUpdated();
   bool Persist();
-  std::string GetFavouritesUrl(const CFileItem &item, int contextWindow) const;
 
   std::string m_userDataFolder;
   CFileItemList m_favourites;
+  mutable std::unordered_map<std::string, std::shared_ptr<CFileItem>> m_targets;
   CEventSource<FavouritesUpdated> m_events;
   mutable CCriticalSection m_criticalSection;
 };
-

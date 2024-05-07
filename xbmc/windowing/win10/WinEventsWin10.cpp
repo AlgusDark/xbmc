@@ -8,10 +8,10 @@
 
 #include "WinEventsWin10.h"
 
-#include "AppInboundProtocol.h"
-#include "Application.h"
 #include "GUIUserMessages.h"
 #include "ServiceBroker.h"
+#include "application/AppInboundProtocol.h"
+#include "application/Application.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "input/actions/Action.h"
@@ -276,8 +276,10 @@ void CWinEventsWin10::OnWindowActivationChanged(const CoreWindow& sender, const 
   }
   if (g_application.GetRenderGUI() != active)
     DX::Windowing()->NotifyAppActiveChange(g_application.GetRenderGUI());
-  CLog::Log(LOGDEBUG, __FUNCTION__ ": window is {}",
-            g_application.GetRenderGUI() ? "active" : "inactive");
+
+  if (CServiceBroker::IsLoggingUp())
+    CLog::Log(LOGDEBUG, __FUNCTION__ ": window is {}",
+              g_application.GetRenderGUI() ? "active" : "inactive");
 }
 
 void CWinEventsWin10::OnWindowClosed(const CoreWindow& sender, const CoreWindowEventArgs& args)

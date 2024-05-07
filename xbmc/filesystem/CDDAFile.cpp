@@ -21,13 +21,9 @@
 using namespace MEDIA_DETECT;
 using namespace XFILE;
 
-CFileCDDA::CFileCDDA(void)
+CFileCDDA::CFileCDDA(void) : m_cdio(CLibcdio::GetInstance())
 {
   m_pCdIo = NULL;
-  m_lsnStart = CDIO_INVALID_LSN;
-  m_lsnCurrent = CDIO_INVALID_LSN;
-  m_lsnEnd = CDIO_INVALID_LSN;
-  m_cdio = CLibcdio::GetInstance();
   m_iSectorCount = 52;
 }
 
@@ -92,9 +88,9 @@ bool CFileCDDA::Exists(const CURL& url)
 
 int CFileCDDA::Stat(const CURL& url, struct __stat64* buffer)
 {
-  if (Open(url))
+  if (Open(url) && buffer)
   {
-    memset(buffer, 0, sizeof(struct __stat64));
+    *buffer = {};
     buffer->st_size = GetLength();
     buffer->st_mode = _S_IFREG;
     Close();

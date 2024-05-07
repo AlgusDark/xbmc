@@ -26,15 +26,15 @@
 #if !defined(TARGET_FREEBSD) && (!defined(TARGET_ANDROID) && defined(__LP64__))
 #include <sys/timeb.h>
 #endif
-#ifdef HAS_DVD_DRIVE
-  #ifdef TARGET_POSIX
-    #include <sys/ioctl.h>
-    #if defined(TARGET_DARWIN)
-      #include <IOKit/storage/IODVDMediaBSDClient.h>
-    #elif !defined(TARGET_FREEBSD)
-      #include <linux/cdrom.h>
-    #endif
-  #endif
+#ifdef HAS_OPTICAL_DRIVE
+#ifdef TARGET_POSIX
+#include <sys/ioctl.h>
+#if defined(TARGET_DARWIN)
+#include <IOKit/storage/IODVDMediaBSDClient.h>
+#elif !defined(TARGET_FREEBSD)
+#include <linux/cdrom.h>
+#endif
+#endif
 #endif
 #include <fcntl.h>
 #include <time.h>
@@ -44,6 +44,7 @@
 #endif
 #include "CompileInfo.h"
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "URL.h"
 #include "Util.h"
@@ -934,7 +935,7 @@ extern "C"
     CURL url(CSpecialProtocol::TranslatePath(file));
     if (url.IsLocal())
     { // Make sure the slashes are correct & translate the path
-      return opendir(CUtil::ValidatePath(url.Get().c_str()).c_str());
+      return opendir(CUtil::ValidatePath(url.Get()).c_str());
     }
 
     // locate next free directory
@@ -1783,7 +1784,7 @@ extern "C"
   char* dllstrerror(int iErr)
   {
     static char szError[32];
-    sprintf(szError, "err:%i", iErr);
+    snprintf(szError, sizeof(szError), "err:%i", iErr);
     return (char*)szError;
   }
 
@@ -1992,7 +1993,7 @@ extern "C"
      if (!pFile)
        return -1;
 
-#if defined(HAS_DVD_DRIVE) && !defined(TARGET_FREEBSD)
+#if defined(HAS_OPTICAL_DRIVE) && !defined(TARGET_FREEBSD)
 #if !defined(TARGET_DARWIN)
     if(request == DVD_READ_STRUCT || request == DVD_AUTH)
 #else
@@ -2029,7 +2030,7 @@ extern "C"
     if (!fp)
       return nullptr;
 
-#if defined(TARGET_LINUX)
+#if defined(TARGET_LINUX) && !defined(TARGET_ANDROID)
     struct mntent* mountPoint = getmntent(fp);
     if (mountPoint)
       return mountPoint;
@@ -2045,6 +2046,19 @@ extern "C"
     CLog::LogF(LOGWARNING, "Unimplemented function called");
     return nullptr;
 #endif
+  }
+
+  struct mntent* dll_getmntent_r(FILE* fp, struct mntent* result, char* buffer, int bufsize)
+  {
+    if (!fp || !result || !buffer)
+      return nullptr;
+
+#if defined(TARGET_LINUX) && !defined(TARGET_ANDROID)
+    struct mntent* mountPoint = getmntent_r(fp, result, buffer, bufsize);
+    if (mountPoint)
+      return mountPoint;
+#endif
+    return nullptr;
   }
 
   // this needs to be wrapped, since dll's have their own file

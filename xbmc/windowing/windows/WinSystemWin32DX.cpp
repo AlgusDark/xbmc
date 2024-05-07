@@ -25,11 +25,6 @@
 #ifndef _M_X64
 #include "utils/SystemInfo.h"
 #endif
-#if _DEBUG
-#pragma comment(lib, "detoursd.lib")
-#else
-#pragma comment(lib, "detours.lib")
-#endif
 #pragma comment(lib, "dxgi.lib")
 #include <windows.h>
 #include <winnt.h>
@@ -147,6 +142,17 @@ void CWinSystemWin32DX::OnMove(int x, int y)
     CDisplaySettings::GetInstance().SetMonitor(KODI::PLATFORM::WINDOWS::FromW(details->MonitorNameW));
     m_deviceResources->SetMonitor(newMonitor);
     m_hMonitor = newMonitor;
+  }
+
+  // Save window position if not fullscreen
+  if (!IsFullScreen() && (m_nLeft != x || m_nTop != y))
+  {
+    m_nLeft = x;
+    m_nTop = y;
+    const auto settings = CServiceBroker::GetSettingsComponent()->GetSettings();
+    settings->SetInt(SETTING_WINDOW_LEFT, x);
+    settings->SetInt(SETTING_WINDOW_TOP, y);
+    settings->Save();
   }
 }
 
@@ -433,4 +439,9 @@ void CWinSystemWin32DX::SetHdrColorSpace(const DXGI_COLOR_SPACE_TYPE colorSpace)
 DEBUG_INFO_RENDER CWinSystemWin32DX::GetDebugInfo()
 {
   return m_deviceResources->GetDebugInfo();
+}
+
+bool CWinSystemWin32DX::SupportsVideoSuperResolution()
+{
+  return m_deviceResources->IsSuperResolutionSupported();
 }

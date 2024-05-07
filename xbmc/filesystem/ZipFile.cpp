@@ -255,10 +255,14 @@ int CZipFile::Stat(struct __stat64 *buffer)
 
 int CZipFile::Stat(const CURL& url, struct __stat64* buffer)
 {
+  if (!buffer)
+    return -1;
+
   if (!g_ZipManager.GetZipEntry(url, mZipItem))
   {
     if (url.GetFileName().empty() && CFile::Exists(url.GetHostName()))
     { // when accessing the zip "root" recognize it as a directory
+      *buffer = {};
       buffer->st_mode = _S_IFDIR;
       return 0;
     }
@@ -266,7 +270,7 @@ int CZipFile::Stat(const CURL& url, struct __stat64* buffer)
       return -1;
   }
 
-  memset(buffer, 0, sizeof(struct __stat64));
+  *buffer = {};
   buffer->st_gid = 0;
   buffer->st_atime = buffer->st_ctime = mZipItem.mod_time;
   buffer->st_size = mZipItem.usize;

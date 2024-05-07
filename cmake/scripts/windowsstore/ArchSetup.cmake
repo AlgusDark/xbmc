@@ -1,11 +1,17 @@
 # Minimum SDK version we support
-set(VS_MINIMUM_SDK_VERSION 10.0.17763.0)
+set(VS_MINIMUM_SDK_VERSION 10.0.18362.0)
 
 if(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION VERSION_LESS VS_MINIMUM_SDK_VERSION)
   message(FATAL_ERROR "Detected Windows SDK version is ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}.\n"
     "Windows SDK ${VS_MINIMUM_SDK_VERSION} or higher is required.\n"
     "INFO: Windows SDKs can be installed from the Visual Studio installer.")
 endif()
+
+# -------- Host Settings ---------
+
+set(_gentoolset ${CMAKE_GENERATOR_TOOLSET})
+string(REPLACE "host=" "" HOSTTOOLSET ${_gentoolset})
+unset(_gentoolset)
 
 # -------- Architecture settings ---------
 
@@ -45,22 +51,22 @@ set(PACKAGE_GUID "281d668b-5739-4abd-b3c2-ed1cda572ed2")
 set(APP_MANIFEST_NAME package.appxmanifest)
 set(DEPS_FOLDER_RELATIVE project/BuildDependencies)
 
-set(DEPENDENCIES_DIR ${CMAKE_SOURCE_DIR}/${DEPS_FOLDER_RELATIVE}/win10-${ARCH})
+# ToDo: currently host build tools are hardcoded to win32
+# If we ever allow package.native other than 0_package.native-win32.list we will want to
+# adapt this based on host
+set(NATIVEPREFIX ${CMAKE_SOURCE_DIR}/${DEPS_FOLDER_RELATIVE}/win32)
+set(DEPENDS_PATH ${CMAKE_SOURCE_DIR}/${DEPS_FOLDER_RELATIVE}/win10-${ARCH})
 set(MINGW_LIBS_DIR ${CMAKE_SOURCE_DIR}/${DEPS_FOLDER_RELATIVE}/mingwlibs/win10-${ARCH})
 
 # mingw libs
 list(APPEND CMAKE_PREFIX_PATH ${MINGW_LIBS_DIR})
 list(APPEND CMAKE_LIBRARY_PATH ${MINGW_LIBS_DIR}/bin)
-# dependencies
-list(PREPEND CMAKE_PREFIX_PATH ${DEPENDENCIES_DIR})
 
 if(NOT TARBALL_DIR)
   set(TARBALL_DIR "${CMAKE_SOURCE_DIR}/project/BuildDependencies/downloads")
 endif()
 
 # -------- Compiler options ---------
-
-set(DEBUG_POSTFIX d CACHE STRING "Debug library postfix.")
 
 add_options(CXX ALL_BUILDS "/wd\"4996\"")
 add_options(CXX ALL_BUILDS "/wd\"4146\"")
@@ -83,7 +89,12 @@ set(SYSTEM_DEFINES -DWIN32_LEAN_AND_MEAN -DNOMINMAX -DHAS_DX -D__STDC_CONSTANT_M
 list(APPEND SYSTEM_DEFINES -DHAS_WIN10_NETWORK)
 
 # The /MP option enables /FS by default.
-set(CMAKE_CXX_FLAGS "/MP ${CMAKE_CXX_FLAGS} /EHsc /await /permissive-")
+if(DEFINED ENV{MAXTHREADS})
+  set(MP_FLAG "/MP$ENV{MAXTHREADS}")
+else()
+  set(MP_FLAG "/MP")
+endif()
+set(CMAKE_CXX_FLAGS "${MP_FLAG} ${CMAKE_CXX_FLAGS} /EHsc /await /permissive-")
 # Google Test needs to use shared version of runtime libraries
 set(gtest_force_shared_crt ON CACHE STRING "" FORCE)
 
@@ -93,7 +104,7 @@ set(gtest_force_shared_crt ON CACHE STRING "" FORCE)
 # For #pragma comment(lib X)
 # TODO: It would certainly be better to handle these libraries via CMake modules.
 link_directories(${MINGW_LIBS_DIR}/lib
-                 ${DEPENDENCIES_DIR}/lib)
+                 ${DEPENDS_PATH}/lib)
 
 list(APPEND DEPLIBS bcrypt.lib d3d11.lib WS2_32.lib dxguid.lib dloadhelper.lib WindowsApp.lib)
 

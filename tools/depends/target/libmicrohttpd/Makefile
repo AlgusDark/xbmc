@@ -1,26 +1,31 @@
-include ../../Makefile.include
-DEPS = ../../Makefile.include Makefile ../../download-files.include
-
-# lib name, version
-LIBNAME=libmicrohttpd
-VERSION=0.9.73
-SOURCE=$(LIBNAME)-$(VERSION)
-ARCHIVE=$(SOURCE).tar.gz
-SHA512=473996b087ac6734ab577a1c7681c6c0b0136e04e34e13c3b50fd758358c1516017ad79097e0c57792786f6dd0208834374c09238113efed13bb4be11ef649d3
-include ../../download-files.include
+include ../../Makefile.include LIBMICROHTTPD-VERSION ../../download-files.include
+DEPS = ../../Makefile.include Makefile LIBMICROHTTPD-VERSION ../../download-files.include
 
 # configuration settings
 CONFIGURE=cp -f $(CONFIG_SUB) $(CONFIG_GUESS) .; \
-          ./configure --prefix=$(PREFIX) --disable-shared \
-            --disable-doc --disable-examples --disable-curl \
-            --enable-https
+          ./configure --prefix=$(PREFIX) \
+                      --disable-shared \
+                      --disable-doc \
+                      --disable-examples \
+                      --disable-curl \
+                      --enable-https
+
+ifeq ($(DEBUG_BUILD), yes)
+  CONFIGURE+= --enable-asserts
+endif
+
+ifeq ($(findstring apple-darwin, $(HOST)), apple-darwin)
+  # blanket disable timespec_get use for apple platforms. timespec_get was introduced in
+  # __API_AVAILABLE(macosx(10.15), ios(13.0), tvos(13.0), watchos(6.0)) but older platforms
+  # are failing to run.
+  CONFIGURE+= mhd_cv_func_timespec_get=no
+endif
 
 LIBDYLIB=$(PLATFORM)/src/microhttpd/.libs/$(LIBNAME).a
 
 all: .installed-$(PLATFORM)
 
-
-$(PLATFORM): $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE) $(DEPS)
+$(PLATFORM): $(DEPS) | $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE)
 	rm -rf $(PLATFORM)/*; mkdir -p $(PLATFORM)
 	cd $(PLATFORM); $(ARCHIVE_TOOL) $(ARCHIVE_TOOL_FLAGS) $(TARBALLS_LOCATION)/$(ARCHIVE)
 	cd $(PLATFORM); $(CONFIGURE)
@@ -38,4 +43,3 @@ clean:
 
 distclean::
 	rm -rf $(PLATFORM) .installed-$(PLATFORM)
-

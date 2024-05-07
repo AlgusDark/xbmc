@@ -8,7 +8,6 @@
 
 #include "SaveFileStateJob.h"
 
-#include "Application.h"
 #include "FileItem.h"
 #include "GUIUserMessages.h"
 #include "ServiceBroker.h"
@@ -16,17 +15,24 @@
 #include "URIUtils.h"
 #include "URL.h"
 #include "Util.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationStackHelper.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIMessage.h"
 #include "guilib/GUIWindowManager.h"
 #include "interfaces/AnnouncementManager.h"
 #include "log.h"
 #include "music/MusicDatabase.h"
+#include "music/MusicFileItemClassify.h"
 #include "music/tags/MusicInfoTag.h"
 #include "network/upnp/UPnP.h"
 #include "utils/Variant.h"
 #include "video/Bookmark.h"
 #include "video/VideoDatabase.h"
+#include "video/VideoFileItemClassify.h"
+
+using namespace KODI;
+using namespace KODI::VIDEO;
 
 void CSaveFileState::DoWork(CFileItem& item,
                             CBookmark& bookmark,
@@ -34,15 +40,24 @@ void CSaveFileState::DoWork(CFileItem& item,
 {
   std::string progressTrackingFile = item.GetPath();
 
-  if (item.HasVideoInfoTag() && StringUtils::StartsWith(item.GetVideoInfoTag()->m_strFileNameAndPath, "removable://"))
-    progressTrackingFile = item.GetVideoInfoTag()->m_strFileNameAndPath; // this variable contains removable:// suffixed by disc label+uniqueid or is empty if label not uniquely identified
-  else if (item.HasVideoInfoTag() && item.IsVideoDb())
-    progressTrackingFile = item.GetVideoInfoTag()->m_strFileNameAndPath; // we need the file url of the video db item to create the bookmark
+  if (item.HasVideoInfoTag() &&
+      StringUtils::StartsWith(item.GetVideoInfoTag()->m_strFileNameAndPath, "removable://"))
+    progressTrackingFile =
+        item.GetVideoInfoTag()
+            ->m_strFileNameAndPath; // this variable contains removable:// suffixed by disc label+uniqueid or is empty if label not uniquely identified
+  else if (IsBlurayPlaylist(item) && (item.GetVideoContentType() == VideoDbContentType::MOVIES ||
+                                      item.GetVideoContentType() == VideoDbContentType::EPISODES))
+    progressTrackingFile = item.GetDynPath();
+  else if (item.HasVideoInfoTag() && IsVideoDb(item))
+    progressTrackingFile =
+        item.GetVideoInfoTag()
+            ->m_strFileNameAndPath; // we need the file url of the video db item to create the bookmark
   else if (item.HasProperty("original_listitem_url"))
   {
     // only use original_listitem_url for Python, UPnP and Bluray sources
     std::string original = item.GetProperty("original_listitem_url").asString();
-    if (URIUtils::IsPlugin(original) || URIUtils::IsUPnP(original) || URIUtils::IsBluray(item.GetPath()))
+    if (URIUtils::IsPlugin(original) || URIUtils::IsUPnP(original) ||
+        URIUtils::IsBluray(item.GetPath()))
       progressTrackingFile = original;
   }
 
@@ -56,7 +71,7 @@ void CSaveFileState::DoWork(CFileItem& item,
       return;
     }
 #endif
-    if (item.IsVideo())
+    if (IsVideo(item))
     {
       std::string redactPath = CURL::GetRedacted(progressTrackingFile);
       CLog::Log(LOGDEBUG, "{} - Saving file state for video item {}", __FUNCTION__, redactPath);
@@ -97,14 +112,18 @@ void CSaveFileState::DoWork(CFileItem& item,
                         redactPath);
 
               // consider this item as played
-              videodatabase.IncrementPlayCount(item);
-              item.GetVideoInfoTag()->IncrementPlayCount();
+              const CDateTime newLastPlayed = videodatabase.IncrementPlayCount(item);
 
-              item.SetOverlayImage(CGUIListItem::ICON_OVERLAY_UNWATCHED, true);
+              item.SetOverlayImage(CGUIListItem::ICON_OVERLAY_WATCHED);
               updateListing = true;
 
               if (item.HasVideoInfoTag())
               {
+                item.GetVideoInfoTag()->IncrementPlayCount();
+
+                if (newLastPlayed.IsValid())
+                  item.GetVideoInfoTag()->m_lastPlayed = newLastPlayed;
+
                 CVariant data;
                 data["id"] = item.GetVideoInfoTag()->m_iDbId;
                 data["type"] = item.GetVideoInfoTag()->m_type;
@@ -114,7 +133,12 @@ void CSaveFileState::DoWork(CFileItem& item,
             }
           }
           else
-            videodatabase.UpdateLastPlayed(item);
+          {
+            const CDateTime newLastPlayed = videodatabase.UpdateLastPlayed(item);
+
+            if (item.HasVideoInfoTag() && newLastPlayed.IsValid())
+              item.GetVideoInfoTag()->m_lastPlayed = newLastPlayed;
+          }
 
           if (!item.HasVideoInfoTag() ||
               item.GetVideoInfoTag()->GetResumePoint().timeInSeconds != bookmark.timeInSeconds)
@@ -149,19 +173,19 @@ void CSaveFileState::DoWork(CFileItem& item,
           if (!videodatabase.GetStreamDetails(dbItem) ||
               dbItem.GetVideoInfoTag()->m_streamDetails != item.GetVideoInfoTag()->m_streamDetails)
           {
-            videodatabase.SetStreamDetailsForFile(item.GetVideoInfoTag()->m_streamDetails, progressTrackingFile);
+            const int idFile = videodatabase.SetStreamDetailsForFile(
+                item.GetVideoInfoTag()->m_streamDetails, item.GetDynPath());
+            if (item.GetVideoContentType() == VideoDbContentType::MOVIES)
+              videodatabase.SetFileForMovie(item.GetDynPath(), item.GetVideoInfoTag()->m_iDbId,
+                                            idFile);
+            else if (item.GetVideoContentType() == VideoDbContentType::EPISODES)
+              videodatabase.SetFileForEpisode(item.GetDynPath(), item.GetVideoInfoTag()->m_iDbId,
+                                              idFile);
             updateListing = true;
           }
         }
 
-        // Could be part of an ISO stack. In this case the bookmark is saved onto the part.
-        // In order to properly update the list, we need to refresh the stack's resume point
-        CApplicationStackHelper& stackHelper = g_application.GetAppStackHelper();
-        if (stackHelper.HasRegisteredStack(item) && stackHelper.GetRegisteredStackTotalTimeMs(item) == 0)
-          videodatabase.GetResumePoint(*(stackHelper.GetRegisteredStack(item)->GetVideoInfoTag()));
-
         videodatabase.CommitTransaction();
-        videodatabase.Close();
 
         if (updateListing)
         {
@@ -169,13 +193,24 @@ void CSaveFileState::DoWork(CFileItem& item,
           CFileItemPtr msgItem(new CFileItem(item));
           if (item.HasProperty("original_listitem_url"))
             msgItem->SetPath(item.GetProperty("original_listitem_url").asString());
+
+          // Could be part of an ISO stack. In this case the bookmark is saved onto the part.
+          // In order to properly update the list, we need to refresh the stack's resume point
+          const auto& components = CServiceBroker::GetAppComponents();
+          const auto stackHelper = components.GetComponent<CApplicationStackHelper>();
+          if (stackHelper->HasRegisteredStack(item) &&
+              stackHelper->GetRegisteredStackTotalTimeMs(item) == 0)
+            videodatabase.GetResumePoint(*(msgItem->GetVideoInfoTag()));
+
           CGUIMessage message(GUI_MSG_NOTIFY_ALL, CServiceBroker::GetGUI()->GetWindowManager().GetActiveWindow(), 0, GUI_MSG_UPDATE_ITEM, 0, msgItem);
           CServiceBroker::GetGUI()->GetWindowManager().SendThreadMessage(message);
         }
+
+        videodatabase.Close();
       }
     }
 
-    if (item.IsAudio())
+    if (MUSIC::IsAudio(item))
     {
       std::string redactPath = CURL::GetRedacted(progressTrackingFile);
       CLog::Log(LOGDEBUG, "{} - Saving file state for audio item {}", __FUNCTION__, redactPath);
@@ -198,7 +233,7 @@ void CSaveFileState::DoWork(CFileItem& item,
 
           // UPnP announce resume point changes to clients
           // however not if playcount is modified as that already announces
-          if (item.IsMusicDb())
+          if (MUSIC::IsMusicDb(item))
           {
             CVariant data;
             data["id"] = item.GetMusicInfoTag()->GetDatabaseId();
@@ -209,10 +244,11 @@ void CSaveFileState::DoWork(CFileItem& item,
         }
       }
 
-      if (item.IsAudioBook())
+      if (MUSIC::IsAudioBook(item))
       {
         musicdatabase.Open();
-        musicdatabase.SetResumeBookmarkForAudioBook(item, item.m_lStartOffset + CUtil::ConvertSecsToMilliSecs(bookmark.timeInSeconds));
+        musicdatabase.SetResumeBookmarkForAudioBook(
+            item, item.GetStartOffset() + CUtil::ConvertSecsToMilliSecs(bookmark.timeInSeconds));
         musicdatabase.Close();
       }
     }

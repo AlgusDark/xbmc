@@ -13,6 +13,7 @@
 #include "settings/AdvancedSettings.h"
 #include "settings/SettingsComponent.h"
 
+#include <memory>
 #include <mutex>
 
 CCriticalSection createSection;
@@ -42,7 +43,8 @@ CProcessInfo* CProcessInfo::CreateInstance()
 
 CProcessInfo::CProcessInfo()
 {
-  m_videoSettingsLocked.reset(new CVideoSettingsLocked(m_videoSettings, m_settingsSection));
+  m_videoSettingsLocked =
+      std::make_unique<CVideoSettingsLocked>(m_videoSettings, m_settingsSection);
 }
 
 void CProcessInfo::SetDataCache(CDataCacheCore *cache)
@@ -269,7 +271,7 @@ void CProcessInfo::UpdateDeinterlacingMethods(std::list<EINTERLACEMETHOD> &metho
     m_deintMethods.push_front(EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE);
 }
 
-bool CProcessInfo::Supports(EINTERLACEMETHOD method)
+bool CProcessInfo::Supports(EINTERLACEMETHOD method) const
 {
   std::unique_lock<CCriticalSection> lock(m_videoCodecSection);
 
@@ -287,7 +289,7 @@ void CProcessInfo::SetDeinterlacingMethodDefault(EINTERLACEMETHOD method)
   m_deintMethodDefault = method;
 }
 
-EINTERLACEMETHOD CProcessInfo::GetDeinterlacingMethodDefault()
+EINTERLACEMETHOD CProcessInfo::GetDeinterlacingMethodDefault() const
 {
   std::unique_lock<CCriticalSection> lock(m_videoCodecSection);
 
@@ -595,6 +597,13 @@ bool CProcessInfo::IsTempoAllowed(float tempo)
     return true;
 
   return false;
+}
+
+unsigned int CProcessInfo::GetMaxPassthroughOffSyncDuration() const
+{
+  return CServiceBroker::GetSettingsComponent()
+      ->GetAdvancedSettings()
+      ->m_maxPassthroughOffSyncDuration;
 }
 
 void CProcessInfo::SetLevelVQ(int level)

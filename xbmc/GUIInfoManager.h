@@ -24,10 +24,13 @@ class CFileItem;
 class CVideoInfoTag;
 
 class CGUIListItem;
-typedef std::shared_ptr<CGUIListItem> CGUIListItemPtr;
 
 namespace KODI
 {
+namespace GAME
+{
+class CGameInfoTag;
+}
 namespace GUILIB
 {
 namespace GUIINFO
@@ -77,6 +80,13 @@ public:
    */
   INFO::InfoPtr Register(const std::string &expression, int context = 0);
 
+  /*! \brief Unregister a boolean condition/expression
+   * This routine allows controls or other clients of the info manager to unregister a previously registered
+   * boolean condition/expression
+   \param expression the boolean condition or expression
+   */
+  void UnRegister(const INFO::InfoPtr& expression);
+
   /// \brief iterates through boolean conditions and compares their stored values to current values. Returns true if any condition changed value.
   bool ConditionsChangedValues(const std::map<INFO::InfoPtr, bool>& map);
 
@@ -88,7 +98,7 @@ public:
    */
   bool EvaluateBool(const std::string& expression,
                     int context,
-                    const CGUIListItemPtr& item = nullptr);
+                    const std::shared_ptr<CGUIListItem>& item = nullptr);
 
   int TranslateString(const std::string &strCondition);
   int TranslateSingleString(const std::string &strCondition, bool &listItemDependent);
@@ -123,6 +133,9 @@ public:
 
   // Current video stuff
   const CVideoInfoTag* GetCurrentMovieTag() const;
+
+  // Current game stuff
+  const KODI::GAME::CGameInfoTag* GetCurrentGameTag() const;
 
   void UpdateAVInfo();
 

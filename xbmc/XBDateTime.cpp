@@ -249,15 +249,13 @@ CDateTime::CDateTime(const KODI::TIME::SystemTime& time)
   m_state = ToFileTime(time, m_time) ? valid : invalid;
 }
 
-CDateTime::CDateTime(const KODI::TIME::FileTime& time)
+CDateTime::CDateTime(const KODI::TIME::FileTime& time) : m_time(time)
 {
-  m_time=time;
   SetValid(true);
 }
 
-CDateTime::CDateTime(const CDateTime& time)
+CDateTime::CDateTime(const CDateTime& time) : m_time(time.m_time)
 {
-  m_time=time.m_time;
   m_state=time.m_state;
 }
 
@@ -820,6 +818,7 @@ void CDateTime::GetAsTm(tm& time) const
   KODI::TIME::SystemTime st;
   GetAsSystemTime(st);
 
+  time = {};
   time.tm_year = st.year - 1900;
   time.tm_mon = st.month - 1;
   time.tm_wday = st.dayOfWeek;
@@ -827,6 +826,7 @@ void CDateTime::GetAsTm(tm& time) const
   time.tm_hour = st.hour;
   time.tm_min = st.minute;
   time.tm_sec = st.second;
+  time.tm_isdst = -1;
 
   mktime(&time);
 }
@@ -1332,7 +1332,14 @@ std::string CDateTime::GetAsLocalizedDate(bool longDate/*=false*/) const
 
 std::string CDateTime::GetAsLocalizedDate(const std::string &strFormat) const
 {
+  return GetAsLocalizedDate(strFormat, ReturnFormat::CHOICE_NO);
+}
+
+std::string CDateTime::GetAsLocalizedDate(const std::string& strFormat,
+                                          ReturnFormat returnFormat) const
+{
   std::string strOut;
+  std::string fmtOut;
 
   KODI::TIME::SystemTime dateTime;
   GetAsSystemTime(dateTime);
@@ -1364,6 +1371,7 @@ std::string CDateTime::GetAsLocalizedDate(const std::string &strFormat) const
       }
       StringUtils::Replace(strPart, "''", "'");
       strOut+=strPart;
+      fmtOut += strPart;
     }
     else if (c=='D' || c=='d') // parse days
     {
@@ -1386,14 +1394,23 @@ std::string CDateTime::GetAsLocalizedDate(const std::string &strFormat) const
       // Format string with the length of the mask
       std::string str;
       if (partLength==1) // single-digit number
+      {
         str = std::to_string(dateTime.day);
+        fmtOut += "%-d";
+      }
       else if (partLength==2) // two-digit number
+      {
         str = StringUtils::Format("{:02}", dateTime.day);
+        fmtOut += "%d";
+      }
       else // Day of week string
       {
         int wday = dateTime.dayOfWeek;
         if (wday < 1 || wday > 7) wday = 7;
-        str = g_localizeStrings.Get((c =='d' ? 40 : 10) + wday);
+        {
+          str = g_localizeStrings.Get((c == 'd' ? 40 : 10) + wday);
+          fmtOut += (c == 'd' ? "%a" : "%A");
+        }
       }
       strOut+=str;
     }
@@ -1418,14 +1435,23 @@ std::string CDateTime::GetAsLocalizedDate(const std::string &strFormat) const
       // Format string with the length of the mask
       std::string str;
       if (partLength==1) // single-digit number
+      {
         str = std::to_string(dateTime.month);
+        fmtOut += "%-m";
+      }
       else if (partLength==2) // two-digit number
+      {
         str = StringUtils::Format("{:02}", dateTime.month);
+        fmtOut += "%m";
+      }
       else // Month string
       {
         int wmonth = dateTime.month;
         if (wmonth < 1 || wmonth > 12) wmonth = 12;
-        str = g_localizeStrings.Get((c =='m' ? 50 : 20) + wmonth);
+        {
+          str = g_localizeStrings.Get((c == 'm' ? 50 : 20) + wmonth);
+          fmtOut += (c == 'm' ? "%b" : "%B");
+        }
       }
       strOut+=str;
     }
@@ -1450,15 +1476,25 @@ std::string CDateTime::GetAsLocalizedDate(const std::string &strFormat) const
       // Format string with the length of the mask
       std::string str = std::to_string(dateTime.year); // four-digit number
       if (partLength <= 2)
+      {
         str.erase(0, 2); // two-digit number
+        fmtOut += "%y";
+      }
+      else
+      {
+        fmtOut += "%Y";
+      }
 
-      strOut+=str;
+      strOut += str;
     }
     else // everything else pass to output
+    {
       strOut+=c;
+      fmtOut += c;
+    }
   }
 
-  return strOut;
+  return (returnFormat == ReturnFormat::CHOICE_YES ? fmtOut : strOut);
 }
 
 std::string CDateTime::GetAsLocalizedDateTime(bool longDate/*=false*/, bool withSeconds/*=true*/) const

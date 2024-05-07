@@ -4,7 +4,7 @@ include(cmake/scripts/linux/Linkers.txt)
 set(CORE_MAIN_SOURCE ${CMAKE_SOURCE_DIR}/xbmc/platform/posix/main.cpp)
 
 # we always want to use GNU features if available, so set _GNU_SOURCE
-set(ARCH_DEFINES -DTARGET_POSIX -DTARGET_LINUX -D_GNU_SOURCE)
+list(APPEND ARCH_DEFINES -DTARGET_POSIX -DTARGET_LINUX -D_GNU_SOURCE)
 set(SYSTEM_DEFINES -D__STDC_CONSTANT_MACROS -D_FILE_OFFSET_BITS=64)
 set(PLATFORM_DIR platform/linux)
 set(PLATFORMDEFS_DIR platform/posix)
@@ -43,6 +43,9 @@ else()
   elseif(CPU MATCHES ppc64le)
     set(ARCH ppc64le)
     set(NEON False)
+  elseif(CPU MATCHES loongarch64)
+    set(ARCH loongarch64)
+    set(NEON False)
   else()
     message(SEND_ERROR "Unknown CPU: ${CPU}")
   endif()
@@ -80,7 +83,7 @@ if(CMAKE_BUILD_TYPE STREQUAL Release OR CMAKE_BUILD_TYPE STREQUAL MinSizeRel)
           set(NJOBS ${USE_LTO})
         endif()
 
-        if(CMAKE_COMPILER_IS_GNUCXX)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL GNU)
           # GCC
           # Make sure we strip binaries in Release build
           set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
@@ -190,3 +193,15 @@ if(ARCH_IS_BIGENDIAN)
 else()
   message(STATUS "Host architecture is little-endian")
 endif()
+
+# Build internal libs
+if(NOT USE_INTERNAL_LIBS)
+  if(KODI_DEPENDSBUILD)
+    set(USE_INTERNAL_LIBS ON)
+  else()
+    set(USE_INTERNAL_LIBS OFF)
+  endif()
+endif()
+
+# Atomic library
+list(APPEND PLATFORM_REQUIRED_DEPS Atomic)

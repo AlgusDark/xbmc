@@ -12,9 +12,11 @@
 #include "NfoFile.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "addons/AddonManager.h"
 #include "addons/AddonSystemSettings.h"
+#include "addons/addoninfo/AddonType.h"
 #include "filesystem/File.h"
 #include "music/Album.h"
 #include "music/Artist.h"
@@ -37,33 +39,34 @@ CInfoScanner::INFO_TYPE CNfoFile::Create(const std::string& strPath,
   CFileItemList items;
   bool bNfo=false;
 
-  if (m_type == ADDON_SCRAPER_ALBUMS)
+  if (m_type == AddonType::SCRAPER_ALBUMS)
   {
     CAlbum album;
     bNfo = GetDetails(album);
   }
-  else if (m_type == ADDON_SCRAPER_ARTISTS)
+  else if (m_type == AddonType::SCRAPER_ARTISTS)
   {
     CArtist artist;
     bNfo = GetDetails(artist);
   }
-  else if (m_type == ADDON_SCRAPER_TVSHOWS || m_type == ADDON_SCRAPER_MOVIES
-           || m_type == ADDON_SCRAPER_MUSICVIDEOS)
+  else if (m_type == AddonType::SCRAPER_TVSHOWS || m_type == AddonType::SCRAPER_MOVIES ||
+           m_type == AddonType::SCRAPER_MUSICVIDEOS)
   {
     // first check if it's an XML file with the info we need
     CVideoInfoTag details;
     bNfo = GetDetails(details);
-    if (episode > -1 && bNfo && m_type == ADDON_SCRAPER_TVSHOWS)
+    if (episode > -1 && bNfo && m_type == AddonType::SCRAPER_TVSHOWS)
     {
       int infos=0;
       while (m_headPos != std::string::npos && details.m_iEpisode != episode)
       {
-        m_headPos = m_doc.find("<episodedetails", m_headPos + 1);
+        m_headPos = m_doc.find("<episodedetails", m_headPos);
         if (m_headPos == std::string::npos)
           break;
 
         bNfo  = GetDetails(details);
         infos++;
+        m_headPos++;
       }
       if (details.m_iEpisode != episode)
       {
@@ -149,7 +152,7 @@ void CNfoFile::Close()
   m_scurl.Clear();
 }
 
-std::vector<ScraperPtr> CNfoFile::GetScrapers(TYPE type, const ScraperPtr& selectedScraper)
+std::vector<ScraperPtr> CNfoFile::GetScrapers(AddonType type, const ScraperPtr& selectedScraper)
 {
   AddonPtr addon;
   ScraperPtr defaultScraper;

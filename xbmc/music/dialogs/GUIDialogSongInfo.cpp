@@ -16,12 +16,13 @@
 #include "Util.h"
 #include "dialogs/GUIDialogBusy.h"
 #include "dialogs/GUIDialogFileBrowser.h"
-#include "filesystem/File.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "music/MusicDatabase.h"
+#include "music/MusicFileItemClassify.h"
 #include "music/MusicUtils.h"
 #include "music/tags/MusicInfoTag.h"
 #include "music/windows/GUIWindowMusicBase.h"
@@ -29,19 +30,19 @@
 #include "settings/MediaSourceSettings.h"
 #include "settings/SettingsComponent.h"
 #include "storage/MediaManager.h"
+#include "utils/FileUtils.h"
 
-using namespace XFILE;
+using namespace KODI;
 
 #define CONTROL_BTN_REFRESH       6
 #define CONTROL_USERRATING        7
+#define CONTROL_BTN_PLAY 8
 #define CONTROL_BTN_GET_THUMB     10
 #define CONTROL_ALBUMINFO         12
 
 #define CONTROL_LIST              50
 
 #define TIME_TO_BUSY_DIALOG 500
-
-
 
 class CGetSongInfoJob : public CJob
 {
@@ -185,6 +186,12 @@ bool CGUIDialogSongInfo::OnMessage(CGUIMessage& message)
           return true;
         }
       }
+      else if (iControl == CONTROL_BTN_PLAY)
+      {
+        OnPlaySong(m_song);
+        return true;
+      }
+      return false;
     }
     break;
   }
@@ -247,6 +254,7 @@ void CGUIDialogSongInfo::OnInitWindow()
   SET_CONTROL_LABEL(CONTROL_USERRATING, 38023);
   SET_CONTROL_LABEL(CONTROL_BTN_GET_THUMB, 13511);
   SET_CONTROL_LABEL(CONTROL_ALBUMINFO, 10523);
+  SET_CONTROL_LABEL(CONTROL_BTN_PLAY, 208);
 
   CGUIDialog::OnInitWindow();
 }
@@ -368,12 +376,12 @@ void CGUIDialogSongInfo::OnGetArt()
   if (type == "thumb")
   { // Local thumb type art held in <filename>.tbn (for non-library items)
     localThumb = m_song->GetUserMusicThumb(true);
-    if (m_song->IsMusicDb())
+    if (MUSIC::IsMusicDb(*m_song))
     {
       CFileItem item(m_song->GetMusicInfoTag()->GetURL(), false);
       localThumb = item.GetUserMusicThumb(true);
     }
-    if (CFile::Exists(localThumb))
+    if (CFileUtils::Exists(localThumb))
     {
       CFileItemPtr item(new CFileItem("thumb://Local", false));
       item->SetArt("thumb", localThumb);
@@ -431,7 +439,7 @@ void CGUIDialogSongInfo::OnGetArt()
       newArt = localThumb;
 //    else if (result == "thumb://Embedded")
 //      newArt = embeddedArt;
-    else if (CFile::Exists(result))
+    else if (CFileUtils::Exists(result))
       newArt = result;
     else // none
       newArt.clear();
@@ -488,7 +496,7 @@ void CGUIDialogSongInfo::ShowFor(CFileItem* pItem)
 {
   if (pItem->m_bIsFolder)
     return;
-  if (!pItem->IsMusicDb())
+  if (!MUSIC::IsMusicDb(*pItem))
     pItem->LoadMusicTag();
   if (!pItem->HasMusicInfoTag())
     return;
@@ -508,5 +516,10 @@ void CGUIDialogSongInfo::ShowFor(CFileItem* pItem)
       }
     }
   }
+}
 
+void CGUIDialogSongInfo::OnPlaySong(const std::shared_ptr<CFileItem>& item)
+{
+  Close(true);
+  MUSIC_UTILS::PlayItem(item, "");
 }

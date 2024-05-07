@@ -8,12 +8,12 @@
 
 #include "WinEventsAndroid.h"
 
-#include "AppInboundProtocol.h"
 #include "ServiceBroker.h"
+#include "application/AppInboundProtocol.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "input/InputManager.h"
-#include "input/XBMC_vkeys.h"
+#include "input/keyboard/XBMC_vkeys.h"
 #include "utils/log.h"
 
 #include <mutex>

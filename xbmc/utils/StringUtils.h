@@ -31,7 +31,7 @@
 #undef FMT_DEPRECATED
 #define FMT_DEPRECATED
 #endif
-#include "XBDateTime.h"
+#include "utils/TimeFormat.h"
 #include "utils/params_check_macros.h"
 
 #include <fmt/format.h>
@@ -116,6 +116,16 @@ public:
   static std::string& TrimRight(std::string &str);
   static std::string& TrimRight(std::string &str, const char* const chars);
   static std::string& RemoveDuplicatedSpacesAndTabs(std::string& str);
+
+  /*! \brief Check if the character is a special character.
+
+   A special character is not an alphanumeric character, and is not useful to provide information
+
+   \param c Input character to be checked
+   */
+  static bool IsSpecialCharacter(char c);
+
+  static std::string ReplaceSpecialCharactersWithSpace(const std::string& str);
   static int Replace(std::string &str, char oldChar, char newChar);
   static int Replace(std::string &str, const std::string &oldStr, const std::string &newStr);
   static int Replace(std::wstring &str, const std::wstring &oldStr, const std::wstring &newStr);
@@ -355,6 +365,15 @@ public:
    */
   static std::string Paramify(const std::string &param);
 
+  /*! \brief Unescapes the given string.
+
+   Unescapes backslashes and double-quotes and removes double-quotes around the whole string.
+
+   \param param String to unescape/deparamify
+   \return Unescaped/Deparamified string
+   */
+  static std::string DeParamify(const std::string& param);
+
   /*! \brief Split a string by the specified delimiters.
    Splits a string using one or more delimiting characters, ignoring empty tokens.
    Differs from Split() in two ways:
@@ -366,7 +385,30 @@ public:
   static void Tokenize(const std::string& input, std::vector<std::string>& tokens, const std::string& delimiters);
   static std::vector<std::string> Tokenize(const std::string& input, const char delimiter);
   static void Tokenize(const std::string& input, std::vector<std::string>& tokens, const char delimiter);
-  static uint64_t ToUint64(const std::string& str, uint64_t fallback) noexcept;
+
+  /*!
+   * \brief Converts a string to a unsigned int number.
+   * \param str The string to convert
+   * \param fallback [OPT] The number to return when the conversion fails
+   * \return The converted number, otherwise fallback if conversion fails
+   */
+  static uint32_t ToUint32(std::string_view str, uint32_t fallback = 0) noexcept;
+
+  /*!
+   * \brief Converts a string to a unsigned long long number.
+   * \param str The string to convert
+   * \param fallback [OPT] The number to return when the conversion fails
+   * \return The converted number, otherwise fallback if conversion fails
+   */
+  static uint64_t ToUint64(std::string_view str, uint64_t fallback = 0) noexcept;
+
+  /*!
+   * \brief Converts a string to a float number.
+   * \param str The string to convert
+   * \param fallback [OPT] The number to return when the conversion fails
+   * \return The converted number, otherwise fallback if conversion fails
+   */
+  static float ToFloat(std::string_view str, float fallback = 0.0f) noexcept;
 
   /*!
    * Returns bytes in a human readable format using the smallest unit that will fit `bytes` in at
@@ -384,6 +426,16 @@ public:
       \return the resulting std::string or ""
    */
   static std::string CreateFromCString(const char* cstr);
+
+  /*!
+   * \brief Check if a keyword string is contained on another string.
+   * \param str The string in which to search for the keyword
+   * \param keyword The string to search for
+   * \return True if the keyword if found.
+   */
+  static bool Contains(std::string_view str,
+                       std::string_view keyword,
+                       bool isCaseInsensitive = true);
 
 private:
   /*!

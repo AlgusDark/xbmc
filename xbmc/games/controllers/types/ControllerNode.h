@@ -21,6 +21,8 @@ namespace GAME
 class CControllerHub;
 
 /*!
+ * \ingroup games
+ *
  * \brief Node in the controller tree
  *
  * The node identifies the controller profile, and optionally the available
@@ -51,10 +53,16 @@ public:
   void GetControllers(ControllerVector& controllers) const;
 
   /*!
-   * \brief Address given to the node by the implementation
+   * \brief Address given to the controller's port by the implementation
    */
-  const std::string& GetAddress() const { return m_address; }
-  void SetAddress(std::string address);
+  const std::string& GetPortAddress() const { return m_portAddress; }
+  void SetPortAddress(std::string portAddress);
+
+  /*!
+   * \brief Address given to the controller node by the implementation
+   */
+  const std::string& GetControllerAddress() const { return m_controllerAddress; }
+  void SetControllerAddress(std::string controllerAddress);
 
   /*!
    * \brief Collection of ports on this controller
@@ -95,9 +103,22 @@ public:
    */
   bool ProvidesInput() const;
 
+  /*!
+   * \brief Get a list of ports that accept player input
+   *
+   * \param[out] inputPorts The list of input ports
+   */
+  void GetInputPorts(std::vector<std::string>& activePorts) const;
+
 private:
   ControllerPtr m_controller;
-  std::string m_address;
+
+  // Address of the port this controller is connected to
+  std::string m_portAddress;
+
+  // Address of this controller: m_portAddress + "/" + m_controller->ID()
+  std::string m_controllerAddress;
+
   std::unique_ptr<CControllerHub> m_hub;
 };
 

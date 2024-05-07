@@ -7,7 +7,7 @@
  */
 #include "RenderSystemDX.h"
 
-#include "Application.h"
+#include "application/Application.h"
 
 #include <mutex>
 #if defined(TARGET_WINDOWS_DESKTOP)
@@ -44,7 +44,6 @@ using namespace Microsoft::WRL;
 using namespace std::chrono_literals;
 
 CRenderSystemDX::CRenderSystemDX() : CRenderSystemBase()
-  , m_interlaced(false)
 {
   m_bVSync = true;
 
@@ -89,8 +88,7 @@ bool CRenderSystemDX::InitRenderSystem()
   CPoint camPoint = { outputSize.Width * 0.5f, outputSize.Height * 0.5f };
   SetCameraPosition(camPoint, outputSize.Width, outputSize.Height);
 
-  DXGI_ADAPTER_DESC AIdentifier = {};
-  m_deviceResources->GetAdapterDesc(&AIdentifier);
+  const DXGI_ADAPTER_DESC AIdentifier = m_deviceResources->GetAdapterDesc();
   m_RenderRenderer = KODI::PLATFORM::WINDOWS::FromW(AIdentifier.Description);
   uint32_t version = 0;
   for (uint32_t decimal = m_deviceResources->GetDeviceFeatureLevel() >> 8, round = 0; decimal > 0; decimal >>= 4, ++round)

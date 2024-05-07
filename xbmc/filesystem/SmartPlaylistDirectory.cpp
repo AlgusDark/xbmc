@@ -9,11 +9,14 @@
 #include "SmartPlaylistDirectory.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "filesystem/Directory.h"
 #include "filesystem/File.h"
 #include "filesystem/FileDirectoryFactory.h"
 #include "music/MusicDatabase.h"
+#include "music/MusicDbUrl.h"
+#include "playlists/PlayListTypes.h"
 #include "playlists/SmartPlayList.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
@@ -21,8 +24,10 @@
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "video/VideoDatabase.h"
+#include "video/VideoDbUrl.h"
 
 #include <math.h>
+#include <memory>
 
 #define PROPERTY_PATH_DB            "path.db"
 #define PROPERTY_SORT_ORDER         "sort.order"
@@ -72,12 +77,14 @@ namespace XFILE
     std::string option = !filter ? "xsp" : "filter";
     std::string group = playlist.GetGroup();
     bool isGrouped = !group.empty() && !StringUtils::EqualsNoCase(group, "none") && !playlist.IsGroupMixed();
+    // Hint for playlist files like STRM
+    PLAYLIST::Id playlistTypeHint = PLAYLIST::TYPE_NONE;
 
     // get all virtual folders and add them to the item list
     playlist.GetVirtualFolders(virtualFolders);
     for (const std::string& virtualFolder : virtualFolders)
     {
-      CFileItemPtr pItem = CFileItemPtr(new CFileItem(virtualFolder, true));
+      CFileItemPtr pItem = std::make_shared<CFileItem>(virtualFolder, true);
       IFileDirectory *dir = CFileDirectoryFactory::Create(pItem->GetURL(), pItem.get());
 
       if (dir != NULL)
@@ -92,6 +99,7 @@ namespace XFILE
         playlist.GetType() == "tvshows" ||
         playlist.GetType() == "episodes")
     {
+      playlistTypeHint = PLAYLIST::TYPE_VIDEO;
       CVideoDatabase db;
       if (db.Open())
       {
@@ -147,6 +155,7 @@ namespace XFILE
     }
     else if (playlist.IsMusicType() || playlist.GetType().empty())
     {
+      playlistTypeHint = PLAYLIST::TYPE_MUSIC;
       CMusicDatabase db;
       if (db.Open())
       {
@@ -204,6 +213,7 @@ namespace XFILE
 
     if (playlist.GetType() == "musicvideos" || playlist.GetType() == "mixed")
     {
+      playlistTypeHint = PLAYLIST::TYPE_VIDEO;
       CVideoDatabase db;
       if (db.Open())
       {
@@ -292,6 +302,7 @@ namespace XFILE
     {
       CFileItemPtr item = items[i];
       item->m_iprogramCount = i;  // hack for playlist order
+      item->SetProperty("playlist_type_hint", playlistTypeHint);
     }
 
     if (playlist.GetType() == "mixed")

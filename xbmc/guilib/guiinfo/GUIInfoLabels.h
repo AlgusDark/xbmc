@@ -27,7 +27,7 @@
 #define PLAYER_FORWARDING_16x        16
 #define PLAYER_FORWARDING_32x        17
 #define PLAYER_CACHING               20
-#define PLAYER_DISPLAY_AFTER_SEEK    21
+// unused id 21
 #define PLAYER_PROGRESS              22
 #define PLAYER_SEEKBAR               23
 #define PLAYER_SEEKTIME              24
@@ -72,7 +72,6 @@
 #define PLAYER_HAS_RESOLUTIONS       64
 #define PLAYER_FRAMEADVANCE          65
 #define PLAYER_ICON                  66
-#define PLAYER_CUTLIST               67
 #define PLAYER_CHAPTERS              68
 #define PLAYER_EDITLIST 69
 #define PLAYER_CUTS 70
@@ -83,6 +82,8 @@
 #define PLAYER_FILEPATH              82
 #define PLAYER_TITLE                 83
 #define PLAYER_FILENAME              84
+#define PLAYER_IS_REMOTE      85
+#define PLAYER_IS_EXTERNAL    86
 
 // Range of player infolabels that work with offset and position
 #define PLAYER_OFFSET_POSITION_FIRST PLAYER_PATH
@@ -148,6 +149,7 @@
 #define SYSTEM_INTERNET_STATE       159
 #define SYSTEM_HAS_INPUT_HIDDEN     160
 #define SYSTEM_HAS_PVR_ADDON        161
+
 #define SYSTEM_ALARM_LESS_OR_EQUAL  180
 #define SYSTEM_PROFILECOUNT         181
 #define SYSTEM_ISFULLSCREEN         182
@@ -167,7 +169,6 @@
 #define NETWORK_GATEWAY_ADDRESS     195
 #define NETWORK_DNS1_ADDRESS        196
 #define NETWORK_DNS2_ADDRESS        197
-#define NETWORK_DHCP_ADDRESS        198
 
 // Keep musicplayer infolabels that work with offset and position together
 #define MUSICPLAYER_TITLE           200
@@ -223,6 +224,8 @@
 #define MUSICPLAYER_CONTENT         246
 #define MUSICPLAYER_ISMULTIDISC     247
 
+// Videoplayer infolabels
+#define VIDEOPLAYER_HDR_TYPE          249
 // Keep videoplayer infolabels that work with offset and position together
 #define VIDEOPLAYER_TITLE             250
 #define VIDEOPLAYER_GENRE             251
@@ -254,11 +257,11 @@
 #define VIDEOPLAYER_USER_RATING       277
 #define VIDEOPLAYER_DBID              278
 #define VIDEOPLAYER_TVSHOWDBID        279
-#define VIDEOPLAYER_HDR_TYPE          280
+#define VIDEOPLAYER_ART               280
 
 // Range of videoplayer infolabels that work with offset and position
 #define VIDEOPLAYER_OFFSET_POSITION_FIRST VIDEOPLAYER_TITLE
-#define VIDEOPLAYER_OFFSET_POSITION_LAST VIDEOPLAYER_TVSHOWDBID
+#define VIDEOPLAYER_OFFSET_POSITION_LAST VIDEOPLAYER_ART
 
 #define VIDEOPLAYER_AUDIO_BITRATE     281
 #define VIDEOPLAYER_VIDEO_BITRATE     282
@@ -274,6 +277,7 @@
 #define VIDEOPLAYER_CAST_AND_ROLE     293
 #define VIDEOPLAYER_UNIQUEID          294
 #define VIDEOPLAYER_AUDIOSTREAMCOUNT  295
+#define VIDEOPLAYER_VIDEOVERSION_NAME 296
 
 // Videoplayer infobools
 #define VIDEOPLAYER_HASSUBTITLES      300
@@ -287,6 +291,7 @@
 #define VIDEOPLAYER_HAS_INFO          308
 #define VIDEOPLAYER_HASTELETEXT       309
 #define VIDEOPLAYER_IS_STEREOSCOPIC   310
+#define VIDEOPLAYER_HAS_VIDEOVERSIONS 311
 
 // PVR infolabels
 #define VIDEOPLAYER_EVENT             313
@@ -406,6 +411,8 @@
 #define SKIN_ASPECT_RATIO           607
 #define SKIN_FONT                   608
 #define SKIN_INTEGER 609
+#define SKIN_TIMER_IS_RUNNING 610
+#define SKIN_TIMER_ELAPSEDSECS 611
 
 #define SYSTEM_IS_SCREENSAVER_INHIBITED 641
 #define SYSTEM_ADDON_UPDATE_COUNT   642
@@ -477,7 +484,9 @@
 #define SYSTEM_MEDIA_AUDIO_CD       754
 
 #define SYSTEM_PLATFORM_DARWIN_TVOS 755
-#define SYSTEM_SUPPORTED_HDR_TYPES 756
+#define SYSTEM_SUPPORTED_HDR_TYPES  756
+#define SYSTEM_PLATFORM_WEBOS       757
+#define SYSTEM_PVR_COUNT            758
 
 #define SLIDESHOW_ISPAUSED          800
 #define SLIDESHOW_ISRANDOM          801
@@ -560,6 +569,9 @@
 #define SYSTEM_HAS_CMS              1006
 #define SYSTEM_BUILD_VERSION_CODE 1007
 #define SYSTEM_BUILD_VERSION_GIT 1008
+
+static constexpr unsigned int SYSTEM_LOCALE_REGION = 1011;
+static constexpr unsigned int SYSTEM_LOCALE = 1012;
 
 #define PVR_CONDITIONS_START        1100
 #define PVR_IS_RECORDING            (PVR_CONDITIONS_START)
@@ -959,6 +971,15 @@
 #define LISTITEM_ALBUMSTATUS        (LISTITEM_START + 206)
 #define LISTITEM_ISAUTOUPDATEABLE   (LISTITEM_START + 207)
 #define LISTITEM_VIDEO_HDR_TYPE     (LISTITEM_START + 208)
+#define LISTITEM_SONG_VIDEO_URL     (LISTITEM_START + 209)
+#define LISTITEM_PARENTAL_RATING_CODE (LISTITEM_START + 210)
+#define LISTITEM_VIDEO_WIDTH        (LISTITEM_START + 211)
+#define LISTITEM_VIDEO_HEIGHT       (LISTITEM_START + 212)
+#define LISTITEM_HASVIDEOVERSIONS   (LISTITEM_START + 213)
+#define LISTITEM_ISVIDEOEXTRA       (LISTITEM_START + 214)
+#define LISTITEM_VIDEOVERSION_NAME  (LISTITEM_START + 215)
+#define LISTITEM_HASVIDEOEXTRAS     (LISTITEM_START + 216)
+#define LISTITEM_BACKEND_INSTANCE_NAME (LISTITEM_START + 217)
 
 #define LISTITEM_END                (LISTITEM_START + 2500)
 

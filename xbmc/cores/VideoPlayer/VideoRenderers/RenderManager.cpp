@@ -8,30 +8,28 @@
 
 #include "RenderManager.h"
 
-#include "Application.h"
+/* to use the same as player */
+#include "../VideoPlayer/DVDClock.h"
+#include "../VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 #include "RenderCapture.h"
 #include "RenderFactory.h"
 #include "RenderFlags.h"
 #include "ServiceBroker.h"
+#include "application/Application.h"
 #include "cores/VideoPlayer/Interface/TimingConstants.h"
 #include "messaging/ApplicationMessenger.h"
 #include "settings/AdvancedSettings.h"
-#include "settings/MediaSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "threads/SingleLock.h"
-#include "utils/MathUtils.h"
 #include "utils/StringUtils.h"
 #include "utils/XTimeUtils.h"
 #include "utils/log.h"
 #include "windowing/GraphicContext.h"
 #include "windowing/WinSystem.h"
 
+#include <memory>
 #include <mutex>
-
-/* to use the same as player */
-#include "../VideoPlayer/DVDClock.h"
-#include "../VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 
 using namespace std::chrono_literals;
 
@@ -56,14 +54,14 @@ CRenderManager::~CRenderManager()
   delete m_pRenderer;
 }
 
-void CRenderManager::GetVideoRect(CRect &source, CRect &dest, CRect &view)
+void CRenderManager::GetVideoRect(CRect& source, CRect& dest, CRect& view) const
 {
   std::unique_lock<CCriticalSection> lock(m_statelock);
   if (m_pRenderer)
     m_pRenderer->GetVideoRect(source, dest, view);
 }
 
-float CRenderManager::GetAspectRatio()
+float CRenderManager::GetAspectRatio() const
 {
   std::unique_lock<CCriticalSection> lock(m_statelock);
   if (m_pRenderer)
@@ -72,7 +70,16 @@ float CRenderManager::GetAspectRatio()
     return 1.0f;
 }
 
-void CRenderManager::SetVideoSettings(CVideoSettings settings)
+unsigned int CRenderManager::GetOrientation() const
+{
+  std::unique_lock<CCriticalSection> lock(m_statelock);
+  if (m_pRenderer)
+    return m_pRenderer->GetOrientation();
+  else
+    return 0;
+}
+
+void CRenderManager::SetVideoSettings(const CVideoSettings& settings)
 {
   std::unique_lock<CCriticalSection> lock(m_statelock);
   if (m_pRenderer)
@@ -139,15 +146,11 @@ bool CRenderManager::Configure(const VideoPicture& picture, float fps, unsigned 
     m_orientation = orientation;
     m_stereomode = picture.stereoMode;
     m_NumberBuffers  = buffers;
-    if (m_renderState == STATE_UNCONFIGURED)
-      m_renderState = STATE_CONFIGURING;
-    else
-      m_renderState = STATE_RECONFIGURING;
-
+    m_renderState = STATE_CONFIGURING;
     m_stateEvent.Reset();
     m_clockSync.Reset();
     m_dvdClock.SetVsyncAdjust(0);
-    m_pConfigPicture.reset(new VideoPicture());
+    m_pConfigPicture = std::make_unique<VideoPicture>();
     m_pConfigPicture->CopyRef(picture);
 
     std::unique_lock<CCriticalSection> lock2(m_presentlock);
@@ -224,13 +227,7 @@ bool CRenderManager::Configure()
       m_free.push_back(i);
 
     m_bRenderGUI = true;
-
-    if (m_renderState == STATE_CONFIGURING ||
-        (CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt(
-             CSettings::SETTING_VIDEOPLAYER_ADJUSTREFRESHRATE) == ADJUST_REFRESHRATE_ALWAYS))
-    {
-      m_bTriggerUpdateResolution = true;
-    }
+    m_bTriggerUpdateResolution = true;
     m_presentstep = PRESENT_IDLE;
     m_presentpts = DVD_NOPTS_VALUE;
     m_lateframes = -1;
@@ -302,12 +299,12 @@ void CRenderManager::FrameMove()
 
     if (m_renderState == STATE_UNCONFIGURED)
       return;
-    else if (m_renderState == STATE_CONFIGURING || m_renderState == STATE_RECONFIGURING)
+    else if (m_renderState == STATE_CONFIGURING)
     {
       lock.unlock();
       if (!Configure())
         return;
-
+      UpdateLatencyTweak();
       firstFrame = true;
       FrameWait(50ms);
     }
@@ -367,7 +364,7 @@ void CRenderManager::PreInit()
       return;
   }
 
-  if (!g_application.IsCurrentThread())
+  if (!CServiceBroker::GetAppMessenger()->IsProcessThread())
   {
     m_initEvent.Reset();
     CServiceBroker::GetAppMessenger()->PostMsg(TMSG_RENDERER_PREINIT);
@@ -396,7 +393,7 @@ void CRenderManager::PreInit()
 
 void CRenderManager::UnInit()
 {
-  if (!g_application.IsCurrentThread())
+  if (!CServiceBroker::GetAppMessenger()->IsProcessThread())
   {
     m_initEvent.Reset();
     CServiceBroker::GetAppMessenger()->PostMsg(TMSG_RENDERER_UNINIT);
@@ -427,7 +424,7 @@ bool CRenderManager::Flush(bool wait, bool saveBuffers)
   if (!m_pRenderer)
     return true;
 
-  if (g_application.IsCurrentThread())
+  if (CServiceBroker::GetAppMessenger()->IsProcessThread())
   {
     CLog::Log(LOGDEBUG, "{} - flushing renderer", __FUNCTION__);
 
@@ -560,7 +557,7 @@ void CRenderManager::StartRenderCapture(unsigned int captureId, unsigned int wid
   capture->SetFlags(flags);
   capture->GetEvent().Reset();
 
-  if (g_application.IsCurrentThread())
+  if (CServiceBroker::GetAppMessenger()->IsProcessThread())
   {
     if (flags & CAPTUREFLAG_IMMEDIATELY)
     {
@@ -663,7 +660,7 @@ void CRenderManager::ManageCaptures()
 
 void CRenderManager::RenderCapture(CRenderCapture* capture)
 {
-  if (!m_pRenderer || !m_pRenderer->RenderCapture(capture))
+  if (!m_pRenderer || !m_pRenderer->RenderCapture(m_presentsource, capture))
     capture->SetState(CAPTURESTATE_FAILED);
 }
 
@@ -893,11 +890,14 @@ void CRenderManager::PresentBlend(bool clear, DWORD flags, DWORD alpha)
 void CRenderManager::UpdateLatencyTweak()
 {
   float fps = CServiceBroker::GetWinSystem()->GetGfxContext().GetFPS();
+  const bool isHDREnabled = CServiceBroker::GetWinSystem()->GetOSHDRStatus() == HDR_STATUS::HDR_ON;
+
   float refresh = fps;
   if (CServiceBroker::GetWinSystem()->GetGfxContext().GetVideoResolution() == RES_WINDOW)
     refresh = 0; // No idea about refresh rate when windowed, just get the default latency
   m_latencyTweak = static_cast<double>(
-      CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->GetLatencyTweak(refresh));
+      CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->GetLatencyTweak(refresh,
+                                                                                     isHDREnabled));
 }
 
 void CRenderManager::UpdateResolution()
@@ -1058,7 +1058,7 @@ bool CRenderManager::AddVideoPicture(const VideoPicture& picture, volatile std::
   return true;
 }
 
-void CRenderManager::AddOverlay(CDVDOverlay* o, double pts)
+void CRenderManager::AddOverlay(std::shared_ptr<CDVDOverlay> o, double pts)
 {
   int idx;
   {
@@ -1068,10 +1068,10 @@ void CRenderManager::AddOverlay(CDVDOverlay* o, double pts)
     idx = m_free.front();
   }
   std::unique_lock<CCriticalSection> lock(m_datalock);
-  m_overlays.AddOverlay(o, pts, idx);
+  m_overlays.AddOverlay(std::move(o), pts, idx);
 }
 
-bool CRenderManager::Supports(ERENDERFEATURE feature)
+bool CRenderManager::Supports(ERENDERFEATURE feature) const
 {
   std::unique_lock<CCriticalSection> lock(m_statelock);
   if (m_pRenderer)
@@ -1080,7 +1080,7 @@ bool CRenderManager::Supports(ERENDERFEATURE feature)
     return false;
 }
 
-bool CRenderManager::Supports(ESCALINGMETHOD method)
+bool CRenderManager::Supports(ESCALINGMETHOD method) const
 {
   std::unique_lock<CCriticalSection> lock(m_statelock);
   if (m_pRenderer)

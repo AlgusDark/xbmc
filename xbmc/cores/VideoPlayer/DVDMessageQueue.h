@@ -19,16 +19,11 @@
 
 struct DVDMessageListItem
 {
-  DVDMessageListItem(std::shared_ptr<CDVDMsg> msg, int prio)
+  DVDMessageListItem(std::shared_ptr<CDVDMsg> msg, int prio) : message(std::move(msg))
   {
-    message = std::move(msg);
     priority = prio;
   }
-  DVDMessageListItem()
-  {
-    message = NULL;
-    priority = 0;
-  }
+  DVDMessageListItem() { priority = 0; }
   DVDMessageListItem(const DVDMessageListItem&) = delete;
   ~DVDMessageListItem() = default;
 
@@ -70,12 +65,12 @@ public:
    * priority,  minimum priority to get, outputs returned packets priority
    */
   MsgQueueReturnCode Get(std::shared_ptr<CDVDMsg>& pMsg,
-                         unsigned int iTimeoutInMilliSeconds,
+                         std::chrono::milliseconds timeout,
                          int& priority);
-  MsgQueueReturnCode Get(std::shared_ptr<CDVDMsg>& pMsg, unsigned int iTimeoutInMilliSeconds)
+  MsgQueueReturnCode Get(std::shared_ptr<CDVDMsg>& pMsg, std::chrono::milliseconds timeout)
   {
     int priority = 0;
-    return Get(pMsg, iTimeoutInMilliSeconds, priority);
+    return Get(pMsg, timeout, priority);
   }
 
   int GetDataSize() const { return m_iDataSize; }
@@ -103,7 +98,7 @@ private:
   CEvent m_hEvent;
   mutable CCriticalSection m_section;
 
-  std::atomic<bool> m_bAbortRequest;
+  std::atomic<bool> m_bAbortRequest = false;
   bool m_bInitialized;
   bool m_drain = false;
 

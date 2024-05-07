@@ -8,9 +8,10 @@
 
 #include "TCPServer.h"
 
-#include "Network.h"
+#include "ServiceBroker.h"
 #include "interfaces/AnnouncementManager.h"
 #include "interfaces/json-rpc/JSONRPC.h"
+#include "network/Network.h"
 #include "settings/AdvancedSettings.h"
 #include "settings/SettingsComponent.h"
 #include "utils/Variant.h"
@@ -718,7 +719,8 @@ void CTCPServer::CWebSocketClient::PushBuffer(CTCPServer *host, const char *buff
       if (send)
       {
         for (unsigned int index = 0; index < frames.size(); index++)
-          Send(frames.at(index)->GetFrameData(), (unsigned int)frames.at(index)->GetFrameLength());
+          CTCPClient::Send(frames.at(index)->GetFrameData(),
+                           static_cast<unsigned int>(frames.at(index)->GetFrameLength()));
       }
       else
       {

@@ -8,6 +8,7 @@
 
 #include "PlayListB4S.h"
 
+#include "FileItem.h"
 #include "Util.h"
 #include "filesystem/File.h"
 #include "music/tags/MusicInfoTag.h"
@@ -104,7 +105,7 @@ void CPlayListB4S::Save(const std::string& strFileName) const
 {
   if (!m_vecItems.size()) return ;
   std::string strPlaylist = strFileName;
-  strPlaylist = CUtil::MakeLegalPath(strPlaylist);
+  strPlaylist = CUtil::MakeLegalPath(std::move(strPlaylist));
   CFile file;
   if (!file.OpenForWrite(strPlaylist, true))
   {

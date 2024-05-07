@@ -8,12 +8,14 @@
 
 #include "GUIWindowHome.h"
 
-#include "Application.h"
 #include "ServiceBroker.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/WindowIDs.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "interfaces/AnnouncementManager.h"
 #include "settings/AdvancedSettings.h"
 #include "settings/SettingsComponent.h"
@@ -41,15 +43,18 @@ CGUIWindowHome::~CGUIWindowHome(void)
 bool CGUIWindowHome::OnAction(const CAction &action)
 {
   static unsigned int min_hold_time = 1000;
-  if (action.GetID() == ACTION_NAV_BACK &&
-      action.GetHoldTime() < min_hold_time &&
-      g_application.GetAppPlayer().IsPlaying())
+  if (action.GetID() == ACTION_NAV_BACK && action.GetHoldTime() < min_hold_time)
   {
-    CGUIComponent* gui = CServiceBroker::GetGUI();
-    if (gui)
-      gui->GetWindowManager().SwitchToFullScreen();
+    const auto& components = CServiceBroker::GetAppComponents();
+    const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+    if (appPlayer->IsPlaying() && (!appPlayer->IsRemotePlaying() || appPlayer->HasAudio()))
+    {
+      CGUIComponent* gui = CServiceBroker::GetGUI();
+      if (gui)
+        gui->GetWindowManager().SwitchToFullScreen();
 
-    return true;
+      return true;
+    }
   }
   return CGUIWindow::OnAction(action);
 }
@@ -73,7 +78,8 @@ void CGUIWindowHome::Announce(ANNOUNCEMENT::AnnouncementFlag flag,
 {
   int ra_flag = 0;
 
-  CLog::Log(LOGDEBUG, LOGANNOUNCE, "GOT ANNOUNCEMENT, type: {}, from {}, message {}", flag, sender, message);
+  CLog::Log(LOGDEBUG, LOGANNOUNCE, "GOT ANNOUNCEMENT, type: {}, from {}, message {}",
+            AnnouncementFlagToString(flag), sender, message);
 
   // we are only interested in library changes
   if ((flag & (ANNOUNCEMENT::VideoLibrary | ANNOUNCEMENT::AudioLibrary)) == 0)

@@ -9,6 +9,7 @@
 #include "DialogGameVideoRotation.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "guilib/LocalizeStrings.h"
 #include "guilib/WindowIDs.h"
 #include "settings/GameSettings.h"
@@ -81,6 +82,12 @@ unsigned int CDialogGameVideoRotation::GetFocusedItem() const
 void CDialogGameVideoRotation::PostExit()
 {
   m_rotations.clear();
+}
+
+bool CDialogGameVideoRotation::OnClickAction()
+{
+  Close();
+  return true;
 }
 
 std::string CDialogGameVideoRotation::GetRotationLabel(unsigned int rotationDegCCW)

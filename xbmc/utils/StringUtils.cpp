@@ -29,7 +29,7 @@
 #include "CharsetConverter.h"
 #include "LangInfo.h"
 #include "StringUtils.h"
-#include "Util.h"
+#include "XBDateTime.h"
 
 #include <algorithm>
 #include <array>
@@ -52,6 +52,24 @@
 // clang-format on
 
 #define FORMAT_BLOCK_SIZE 512 // # of bytes for initial allocation for printf
+
+namespace
+{
+/*!
+ * \brief Converts a string to a number of a specified type, by using istringstream.
+ * \param str The string to convert
+ * \param fallback [OPT] The number to return when the conversion fails
+ * \return The converted number, otherwise fallback if conversion fails
+ */
+template<typename T>
+T NumberFromSS(std::string_view str, T fallback) noexcept
+{
+  std::istringstream iss{str.data()};
+  T result{fallback};
+  iss >> result;
+  return result;
+}
+} // unnamed namespace
 
 static constexpr const char* ADDON_GUID_RE = "^(\\{){0,1}[0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12}(\\}){0,1}$";
 
@@ -571,6 +589,39 @@ std::string& StringUtils::RemoveDuplicatedSpacesAndTabs(std::string& str)
     ++it;
   }
   return str;
+}
+
+bool StringUtils::IsSpecialCharacter(char c)
+{
+  static constexpr std::string_view view(" .-_+,!'\"\t/\\*?#$%&@()[]{}");
+  if (std::any_of(view.begin(), view.end(), [c](char ch) { return ch == c; }))
+    return true;
+  else
+    return false;
+}
+
+std::string StringUtils::ReplaceSpecialCharactersWithSpace(const std::string& str)
+{
+  std::string result;
+  bool prevCharWasSpecial = false;
+
+  for (char c : str)
+  {
+    if (IsSpecialCharacter(c))
+    {
+      if (!prevCharWasSpecial)
+      {
+        result += ' ';
+      }
+      prevCharWasSpecial = true;
+    }
+    else
+    {
+      result += c;
+      prevCharWasSpecial = false;
+    }
+  }
+  return result;
 }
 
 int StringUtils::Replace(std::string &str, char oldChar, char newChar)
@@ -1117,7 +1168,7 @@ int64_t StringUtils::AlphaNumericCompare(const wchar_t* left, const wchar_t* rig
     if (lsym && rsym)
     {
       if (lc != rc)
-        return lc - rc;
+        return static_cast<int64_t>(lc) - static_cast<int64_t>(rc);
       else
       { // Same symbol advance to next wchar
         l++;
@@ -1294,7 +1345,7 @@ int StringUtils::AlphaNumericCollation(int nKey1, const void* pKey1, int nKey2, 
     if (lsym && rsym)
     {
       if (zA[i] != zB[j])
-        return zA[i] - zB[j];
+        return static_cast<int>(zA[i]) - static_cast<int>(zB[j]);
       else
       { // Same symbol advance to next
         i++;
@@ -1327,7 +1378,7 @@ int StringUtils::AlphaNumericCollation(int nKey1, const void* pKey1, int nKey2, 
     {
       if (!g_langInfo.UseLocaleCollation() || (lc <= 128 && rc <= 128))
         // Compare unicode (having applied accent folding collation to non-ascii chars).
-        return lc - rc;
+        return static_cast<int>(lc) - static_cast<int>(rc);
       else
       {
         // Fetch collation facet from locale to do comparison of wide char although on some
@@ -1773,6 +1824,26 @@ std::string StringUtils::Paramify(const std::string &param)
   return "\"" + result + "\"";
 }
 
+std::string StringUtils::DeParamify(const std::string& param)
+{
+  std::string result = param;
+
+  // remove double quotes around the whole string
+  if (StringUtils::StartsWith(result, "\"") && StringUtils::EndsWith(result, "\""))
+  {
+    result.erase(0, 1);
+    result.pop_back();
+
+    // unescape double quotes
+    StringUtils::Replace(result, "\\\"", "\"");
+
+    // unescape backspaces
+    StringUtils::Replace(result, "\\\\", "\\");
+  }
+
+  return result;
+}
+
 std::vector<std::string> StringUtils::Tokenize(const std::string &input, const std::string &delimiters)
 {
   std::vector<std::string> tokens;
@@ -1819,12 +1890,19 @@ void StringUtils::Tokenize(const std::string& input, std::vector<std::string>& t
   }
 }
 
-uint64_t StringUtils::ToUint64(const std::string& str, uint64_t fallback) noexcept
+uint32_t StringUtils::ToUint32(std::string_view str, uint32_t fallback /* = 0 */) noexcept
 {
-  std::istringstream iss(str);
-  uint64_t result(fallback);
-  iss >> result;
-  return result;
+  return NumberFromSS(str, fallback);
+}
+
+uint64_t StringUtils::ToUint64(std::string_view str, uint64_t fallback /* = 0 */) noexcept
+{
+  return NumberFromSS(str, fallback);
+}
+
+float StringUtils::ToFloat(std::string_view str, float fallback /* = 0.0f */) noexcept
+{
+  return NumberFromSS(str, fallback);
 }
 
 std::string StringUtils::FormatFileSize(uint64_t bytes)
@@ -1842,6 +1920,22 @@ std::string StringUtils::FormatFileSize(uint64_t bytes)
   }
   unsigned int decimals = value < 9.995 ? 2 : (value < 99.95 ? 1 : 0);
   return Format("{:.{}f}{}", value, decimals, units[i]);
+}
+
+bool StringUtils::Contains(std::string_view str,
+                           std::string_view keyword,
+                           bool isCaseInsensitive /* = true */)
+{
+  if (isCaseInsensitive)
+  {
+    auto itStr = std::search(str.begin(), str.end(), keyword.begin(), keyword.end(),
+                             [](unsigned char ch1, unsigned char ch2) {
+                               return std::toupper(ch1) == std::toupper(ch2);
+                             });
+    return (itStr != str.end());
+  }
+
+  return str.find(keyword) != std::string_view::npos;
 }
 
 const std::locale& StringUtils::GetOriginalLocale() noexcept

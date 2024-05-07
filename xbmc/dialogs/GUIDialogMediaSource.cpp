@@ -7,33 +7,36 @@
  */
 
 #include "GUIDialogMediaSource.h"
-#include "ServiceBroker.h"
-#include "guilib/GUIKeyboardFactory.h"
+
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIDialogFileBrowser.h"
-#include "video/windows/GUIWindowVideoBase.h"
-#include "music/windows/GUIWindowMusicBase.h"
-#include "guilib/GUIComponent.h"
-#include "guilib/GUIWindowManager.h"
-#include "input/Key.h"
+#include "GUIDialogYesNo.h"
+#include "PasswordManager.h"
+#include "ServiceBroker.h"
+#include "URL.h"
 #include "Util.h"
-#include "utils/URIUtils.h"
-#include "utils/StringUtils.h"
-#include "utils/Variant.h"
 #include "filesystem/Directory.h"
 #include "filesystem/PVRDirectory.h"
-#include "GUIDialogYesNo.h"
-#include "FileItem.h"
+#include "guilib/GUIComponent.h"
+#include "guilib/GUIKeyboardFactory.h"
+#include "guilib/GUIWindowManager.h"
+#include "guilib/LocalizeStrings.h"
+#include "input/actions/ActionIDs.h"
+#include "music/windows/GUIWindowMusicBase.h"
+#include "pvr/recordings/PVRRecordingsPath.h"
 #include "settings/MediaSourceSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
-#include "guilib/LocalizeStrings.h"
-#include "PasswordManager.h"
-#include "URL.h"
-#include "pvr/recordings/PVRRecordingsPath.h"
+#include "utils/StringUtils.h"
+#include "utils/URIUtils.h"
+#include "utils/Variant.h"
+#include "video/windows/GUIWindowVideoBase.h"
 
 #if defined(TARGET_ANDROID)
+#include "utils/FileUtils.h"
+
 #include "platform/android/activity/XBMCApp.h"
-#include "filesystem/File.h"
 #endif
 
 #ifdef TARGET_WINDOWS_STORE
@@ -300,7 +303,7 @@ void CGUIDialogMediaSource::OnPathBrowse(int item)
 #if defined(TARGET_ANDROID)
     // add the default android video directory
     std::string path;
-    if (CXBMCApp::GetExternalStorage(path, "videos") && !path.empty() && CFile::Exists(path))
+    if (CXBMCApp::GetExternalStorage(path, "videos") && !path.empty() && CFileUtils::Exists(path))
     {
       share1.strPath = path;
       share1.strName = g_localizeStrings.Get(20241);
@@ -346,7 +349,7 @@ void CGUIDialogMediaSource::OnPathBrowse(int item)
 #if defined(TARGET_ANDROID)
     // add the default android music directory
     std::string path;
-    if (CXBMCApp::GetExternalStorage(path, "pictures") && !path.empty() && CFile::Exists(path))
+    if (CXBMCApp::GetExternalStorage(path, "pictures") && !path.empty() && CFileUtils::Exists(path))
     {
       share1.strPath = path;
       share1.strName = g_localizeStrings.Get(20242);
@@ -355,7 +358,7 @@ void CGUIDialogMediaSource::OnPathBrowse(int item)
     }
 
     path.clear();
-    if (CXBMCApp::GetExternalStorage(path, "photos") && !path.empty() && CFile::Exists(path))
+    if (CXBMCApp::GetExternalStorage(path, "photos") && !path.empty() && CFileUtils::Exists(path))
     {
       share1.strPath = path;
       share1.strName = g_localizeStrings.Get(20243);

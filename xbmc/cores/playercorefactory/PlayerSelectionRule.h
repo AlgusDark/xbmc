@@ -8,12 +8,12 @@
 
 #pragma once
 
-#include "FileItem.h"
 #include "PlayerCoreFactory.h"
 
 #include <string>
 #include <vector>
 
+class CFileItem;
 class CRegExp;
 class TiXmlElement;
 
@@ -55,6 +55,7 @@ private:
   std::string m_videoCodec;
   std::string m_videoResolution;
   std::string m_videoAspect;
+  std::string m_hdrType;
 
   std::string m_playerName;
 

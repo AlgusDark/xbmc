@@ -23,6 +23,7 @@
 namespace
 {
 
+// clang-format off
 #define X(VAL) std::make_pair(VAL, #VAL)
 std::map<GLenum, const char*> glErrors =
 {
@@ -49,6 +50,14 @@ std::map<GLenum, const char*> glErrorSource = {
     X(GL_DEBUG_SOURCE_APPLICATION_KHR),
     X(GL_DEBUG_SOURCE_OTHER_KHR),
 #endif
+#if defined(HAS_GL) && defined(TARGET_LINUX)
+    X(GL_DEBUG_SOURCE_API),
+    X(GL_DEBUG_SOURCE_WINDOW_SYSTEM),
+    X(GL_DEBUG_SOURCE_SHADER_COMPILER),
+    X(GL_DEBUG_SOURCE_THIRD_PARTY),
+    X(GL_DEBUG_SOURCE_APPLICATION),
+    X(GL_DEBUG_SOURCE_OTHER),
+#endif
 };
 
 std::map<GLenum, const char*> glErrorType = {
@@ -61,6 +70,15 @@ std::map<GLenum, const char*> glErrorType = {
     X(GL_DEBUG_TYPE_OTHER_KHR),
     X(GL_DEBUG_TYPE_MARKER_KHR),
 #endif
+#if defined(HAS_GL) && defined(TARGET_LINUX)
+    X(GL_DEBUG_TYPE_ERROR),
+    X(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR),
+    X(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR),
+    X(GL_DEBUG_TYPE_PORTABILITY),
+    X(GL_DEBUG_TYPE_PERFORMANCE),
+    X(GL_DEBUG_TYPE_OTHER),
+    X(GL_DEBUG_TYPE_MARKER),
+#endif
 };
 
 std::map<GLenum, const char*> glErrorSeverity = {
@@ -70,8 +88,15 @@ std::map<GLenum, const char*> glErrorSeverity = {
     X(GL_DEBUG_SEVERITY_LOW_KHR),
     X(GL_DEBUG_SEVERITY_NOTIFICATION_KHR),
 #endif
+#if defined(HAS_GL) && defined(TARGET_LINUX)
+    X(GL_DEBUG_SEVERITY_HIGH),
+    X(GL_DEBUG_SEVERITY_MEDIUM),
+    X(GL_DEBUG_SEVERITY_LOW),
+    X(GL_DEBUG_SEVERITY_NOTIFICATION),
+#endif
 };
 #undef X
+// clang-format on
 
 } // namespace
 
@@ -149,27 +174,27 @@ void _VerifyGLState(const char* szfile, const char* szfunction, int lineno)
 void LogGraphicsInfo()
 {
 #if defined(HAS_GL) || defined(HAS_GLES)
-  const GLubyte *s;
+  const char* s;
 
-  s = glGetString(GL_VENDOR);
+  s = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
   if (s)
     CLog::Log(LOGINFO, "GL_VENDOR = {}", s);
   else
     CLog::Log(LOGINFO, "GL_VENDOR = NULL");
 
-  s = glGetString(GL_RENDERER);
+  s = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
   if (s)
     CLog::Log(LOGINFO, "GL_RENDERER = {}", s);
   else
     CLog::Log(LOGINFO, "GL_RENDERER = NULL");
 
-  s = glGetString(GL_VERSION);
+  s = reinterpret_cast<const char*>(glGetString(GL_VERSION));
   if (s)
     CLog::Log(LOGINFO, "GL_VERSION = {}", s);
   else
     CLog::Log(LOGINFO, "GL_VERSION = NULL");
 
-  s = glGetString(GL_SHADING_LANGUAGE_VERSION);
+  s = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
   if (s)
     CLog::Log(LOGINFO, "GL_SHADING_LANGUAGE_VERSION = {}", s);
   else

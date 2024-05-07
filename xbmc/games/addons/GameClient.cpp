@@ -17,8 +17,9 @@
 #include "URL.h"
 #include "addons/AddonManager.h"
 #include "addons/BinaryAddonCache.h"
+#include "addons/addoninfo/AddonInfo.h"
+#include "addons/addoninfo/AddonType.h"
 #include "filesystem/Directory.h"
-#include "filesystem/File.h"
 #include "filesystem/SpecialProtocol.h"
 #include "games/GameServices.h"
 #include "games/addons/cheevos/GameClientCheevos.h"
@@ -32,6 +33,7 @@
 #include "input/actions/ActionIDs.h"
 #include "messaging/ApplicationMessenger.h"
 #include "messaging/helpers/DialogOKHelper.h"
+#include "utils/FileUtils.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/log.h"
@@ -39,12 +41,12 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <utility>
 
 using namespace KODI;
 using namespace GAME;
-using namespace KODI::MESSAGING;
 
 #define EXTENSION_SEPARATOR "|"
 #define EXTENSION_WILDCARD "*"
@@ -79,17 +81,14 @@ std::string NormalizeExtension(const std::string& strExtension)
 // --- CGameClient -------------------------------------------------------------
 
 CGameClient::CGameClient(const ADDON::AddonInfoPtr& addonInfo)
-  : CAddonDll(addonInfo, ADDON::ADDON_GAMEDLL),
+  : CAddonDll(addonInfo, ADDON::AddonType::GAMEDLL),
     m_subsystems(CGameClientSubsystem::CreateSubsystems(*this, *m_ifc.game, m_critSection)),
-    m_bSupportsAllExtensions(false),
-    m_bIsPlaying(false),
-    m_serializeSize(0),
-    m_region(GAME_REGION_UNKNOWN)
+    m_bIsPlaying(false)
 {
   using namespace ADDON;
 
   std::vector<std::string> extensions = StringUtils::Split(
-      Type(ADDON_GAMEDLL)->GetValue(GAME_PROPERTY_EXTENSIONS).asString(), EXTENSION_SEPARATOR);
+      Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_EXTENSIONS).asString(), EXTENSION_SEPARATOR);
   std::transform(extensions.begin(), extensions.end(),
                  std::inserter(m_extensions, m_extensions.begin()), NormalizeExtension);
 
@@ -100,9 +99,12 @@ CGameClient::CGameClient(const ADDON::AddonInfoPtr& addonInfo)
     m_extensions.clear();
   }
 
-  m_bSupportsVFS = addonInfo->Type(ADDON_GAMEDLL)->GetValue(GAME_PROPERTY_SUPPORTS_VFS).asBoolean();
+  m_bSupportsVFS =
+      addonInfo->Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_SUPPORTS_VFS).asBoolean();
   m_bSupportsStandalone =
-      addonInfo->Type(ADDON_GAMEDLL)->GetValue(GAME_PROPERTY_SUPPORTS_STANDALONE).asBoolean();
+      addonInfo->Type(AddonType::GAMEDLL)->GetValue(GAME_PROPERTY_SUPPORTS_STANDALONE).asBoolean();
+
+  std::tie(m_emulatorName, m_platforms) = ParseLibretroName(Name());
 }
 
 CGameClient::~CGameClient(void)
@@ -199,12 +201,12 @@ bool CGameClient::OpenFile(const CFileItem& file,
     return false;
 
   // Some cores "succeed" to load the file even if it doesn't exist
-  if (!XFILE::CFile::Exists(file.GetPath()))
+  if (!CFileUtils::Exists(file.GetPath()))
   {
 
     // Failed to play game
     // The required files can't be found.
-    HELPERS::ShowOKDialogText(CVariant{35210}, CVariant{g_localizeStrings.Get(35219)});
+    MESSAGING::HELPERS::ShowOKDialogText(CVariant{35210}, CVariant{g_localizeStrings.Get(35219)});
     return false;
   }
 
@@ -271,6 +273,9 @@ bool CGameClient::OpenStandalone(RETRO::IStreamManager& streamManager, IGameInpu
 
   GAME_ERROR error = GAME_ERROR_FAILED;
 
+  // Loading the game might require the stream subsystem to be initialized
+  Streams().Initialize(streamManager);
+
   try
   {
     LogError(error = m_ifc.game->toAddon->LoadStandalone(m_ifc.game), "LoadStandalone()");
@@ -283,11 +288,13 @@ bool CGameClient::OpenStandalone(RETRO::IStreamManager& streamManager, IGameInpu
   if (error != GAME_ERROR_NO_ERROR)
   {
     NotifyError(error);
+    Streams().Deinitialize();
     return false;
   }
 
   if (!InitializeGameplay("", streamManager, input))
   {
+    Streams().Deinitialize();
     return false;
   }
 
@@ -306,7 +313,7 @@ bool CGameClient::InitializeGameplay(const std::string& gamePath,
     m_gamePath = gamePath;
     m_input = input;
 
-    m_inGameSaves.reset(new CGameClientInGameSaves(this, m_ifc.game));
+    m_inGameSaves = std::make_unique<CGameClientInGameSaves>(this, m_ifc.game);
     m_inGameSaves->Load();
 
     return true;
@@ -399,15 +406,16 @@ void CGameClient::NotifyError(GAME_ERROR error)
   {
     // Failed to play game
     // This game requires the following add-on: %s
-    HELPERS::ShowOKDialogText(CVariant{35210}, CVariant{StringUtils::Format(
-                                                   g_localizeStrings.Get(35211), missingResource)});
+    MESSAGING::HELPERS::ShowOKDialogText(
+        CVariant{35210},
+        CVariant{StringUtils::Format(g_localizeStrings.Get(35211), missingResource)});
   }
   else
   {
     // Failed to play game
     // The emulator "%s" had an internal error.
-    HELPERS::ShowOKDialogText(CVariant{35210},
-                              CVariant{StringUtils::Format(g_localizeStrings.Get(35213), Name())});
+    MESSAGING::HELPERS::ShowOKDialogText(
+        CVariant{35210}, CVariant{StringUtils::Format(g_localizeStrings.Get(35213), Name())});
   }
 }
 
@@ -424,8 +432,8 @@ std::string CGameClient::GetMissingResource()
     if (StringUtils::StartsWith(strDependencyId, "resource.games"))
     {
       AddonPtr addon;
-      const bool bInstalled = CServiceBroker::GetAddonMgr().GetAddon(
-          strDependencyId, addon, ADDON_UNKNOWN, OnlyEnabled::CHOICE_YES);
+      const bool bInstalled =
+          CServiceBroker::GetAddonMgr().GetAddon(strDependencyId, addon, OnlyEnabled::CHOICE_YES);
       if (!bInstalled)
       {
         strAddonId = strDependencyId;
@@ -589,8 +597,6 @@ void CGameClient::LogException(const char* strFunctionName) const
 
 void CGameClient::cb_close_game(KODI_HANDLE kodiInstance)
 {
-  using namespace MESSAGING;
-
   CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
                                              static_cast<void*>(new CAction(ACTION_STOP)));
 }
@@ -685,4 +691,38 @@ bool CGameClient::cb_input_event(KODI_HANDLE kodiInstance, const game_input_even
     return false;
 
   return gameClient->Input().ReceiveInputEvent(*event);
+}
+
+std::pair<std::string, std::string> CGameClient::ParseLibretroName(const std::string& addonName)
+{
+  std::string emulatorName;
+  std::string platforms;
+
+  // libretro has a de-facto standard for naming their cores. If the
+  // core emulates one or more platforms, then the format is:
+  //
+  //   "Platforms (Emulator name)"
+  //
+  // Otherwise, the format is just the name with no platforms:
+  //
+  //   "Emulator name"
+  //
+  // The has been observed for all 130 cores we package.
+  //
+  size_t beginPos = addonName.find('(');
+  size_t endPos = addonName.find(')');
+
+  if (beginPos != std::string::npos && endPos != std::string::npos && beginPos < endPos)
+  {
+    emulatorName = addonName.substr(beginPos + 1, endPos - beginPos - 1);
+    platforms = addonName.substr(0, beginPos);
+    StringUtils::TrimRight(platforms);
+  }
+  else
+  {
+    emulatorName = addonName;
+    platforms.clear();
+  }
+
+  return std::make_pair(emulatorName, platforms);
 }

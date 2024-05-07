@@ -40,10 +40,11 @@ class BaseYUV2RGBGLSLShader : public CGLSLShaderProgram
     void SetBlack(float black) { m_black = black; }
     void SetContrast(float contrast) { m_contrast = contrast; }
     void SetConvertFullColorRange(bool convertFullRange) { m_convertFullRange = convertFullRange; }
-    void SetDisplayMetadata(bool hasDisplayMetadata, AVMasteringDisplayMetadata displayMetadata,
-                            bool hasLightMetadata, AVContentLightMetadata lightMetadata);
+    void SetDisplayMetadata(bool hasDisplayMetadata,
+                            const AVMasteringDisplayMetadata& displayMetadata,
+                            bool hasLightMetadata,
+                            AVContentLightMetadata lightMetadata);
     void SetToneMapParam(float param) { m_toneMappingParam = param; }
-    float GetLuminanceValue() const;
 
     GLint GetVertexLoc() { return m_hVertex; }
     GLint GetYcoordLoc() { return m_hYcoord; }
@@ -68,7 +69,7 @@ class BaseYUV2RGBGLSLShader : public CGLSLShaderProgram
     bool m_hasLightMetadata{false};
     AVContentLightMetadata m_lightMetadata;
     bool m_toneMapping{false};
-    ETONEMAPMETHOD m_toneMappingMethod{VS_TONEMAPMETHOD_REINHARD};
+    ETONEMAPMETHOD m_toneMappingMethod{VS_TONEMAPMETHOD_OFF};
     float m_toneMappingParam{1.0};
 
     bool m_colorConversion{false};
@@ -129,9 +130,9 @@ class BaseYUV2RGBGLSLShader : public CGLSLShaderProgram
     void OnCompiledAndLinked() override;
     bool OnEnabled() override;
 
-    GLint m_hStepX;
-    GLint m_hStepY;
-    GLint m_hField;
+    GLint m_hStepX = -1;
+    GLint m_hStepY = -1;
+    GLint m_hField = -1;
   };
 
   } // namespace GLES

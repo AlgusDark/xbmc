@@ -8,12 +8,13 @@
 
 #include "VideoLibraryResetResumePointJob.h"
 
-#include <vector>
-
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "Util.h"
 #include "filesystem/IDirectory.h"
+
+#include <vector>
 #ifdef HAS_UPNP
 #include "network/upnp/UPnP.h"
 #endif
@@ -24,7 +25,8 @@
 #include "utils/URIUtils.h"
 #include "video/VideoDatabase.h"
 
-CVideoLibraryResetResumePointJob::CVideoLibraryResetResumePointJob(const CFileItemPtr& item)
+CVideoLibraryResetResumePointJob::CVideoLibraryResetResumePointJob(
+    const std::shared_ptr<CFileItem>& item)
   : m_item(item)
 {
 }

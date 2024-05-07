@@ -59,7 +59,7 @@ endif()
 # this variable is set if we can execute build artefacts on the host system (for example unit tests).
 if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL CMAKE_SYSTEM_PROCESSOR AND
    CMAKE_HOST_SYSTEM_NAME STREQUAL CMAKE_SYSTEM_NAME)
-  if(NOT HOST_CAN_EXECUTE_TARGET)
+  if(NOT DEFINED HOST_CAN_EXECUTE_TARGET)
     set(HOST_CAN_EXECUTE_TARGET TRUE)
   endif()
 else()
@@ -166,17 +166,6 @@ if(NOT MSVC)
     -Wextra
     -Wno-unused-parameter # from -Wextra
   )
-
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    add_options(ALL_LANGUAGES ALL_BUILDS
-      -Wno-cast-function-type # from -Wextra
-    )
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    add_options(ALL_LANGUAGES ALL_BUILDS
-      -Wno-bad-function-cast
-      -Wno-deprecated
-    )
-  endif()
 
   add_options(CXX ALL_BUILDS
     -Wnon-virtual-dtor

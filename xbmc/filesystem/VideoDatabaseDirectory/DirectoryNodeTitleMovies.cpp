@@ -8,6 +8,8 @@
 
 #include "DirectoryNodeTitleMovies.h"
 
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "QueryParams.h"
 #include "video/VideoDatabase.h"
 

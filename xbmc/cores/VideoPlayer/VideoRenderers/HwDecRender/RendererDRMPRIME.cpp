@@ -179,10 +179,6 @@ bool CRendererDRMPRIME::NeedBuffer(int index)
   if (m_iLastRenderBuffer == index)
     return true;
 
-  CVideoBufferDRMPRIME* buffer = dynamic_cast<CVideoBufferDRMPRIME*>(m_buffers[index].videoBuffer);
-  if (buffer && buffer->m_fb_id)
-    return true;
-
   return false;
 }
 
@@ -233,7 +229,7 @@ void CRendererDRMPRIME::RenderUpdate(
   m_iLastRenderBuffer = index;
 }
 
-bool CRendererDRMPRIME::RenderCapture(CRenderCapture* capture)
+bool CRendererDRMPRIME::RenderCapture(int index, CRenderCapture* capture)
 {
   capture->BeginRender();
   capture->EndRender();
@@ -248,7 +244,7 @@ bool CRendererDRMPRIME::ConfigChanged(const VideoPicture& picture)
   return false;
 }
 
-bool CRendererDRMPRIME::Supports(ERENDERFEATURE feature)
+bool CRendererDRMPRIME::Supports(ERENDERFEATURE feature) const
 {
   switch (feature)
   {
@@ -262,7 +258,7 @@ bool CRendererDRMPRIME::Supports(ERENDERFEATURE feature)
   }
 }
 
-bool CRendererDRMPRIME::Supports(ESCALINGMETHOD method)
+bool CRendererDRMPRIME::Supports(ESCALINGMETHOD method) const
 {
   return false;
 }

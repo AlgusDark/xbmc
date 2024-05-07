@@ -8,7 +8,9 @@
 #include "FilesystemInstaller.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "filesystem/Directory.h"
+#include "filesystem/File.h"
 #include "filesystem/SpecialProtocol.h"
 #include "utils/FileOperationJob.h"
 #include "utils/StringUtils.h"
@@ -18,9 +20,9 @@
 using namespace XFILE;
 
 CFilesystemInstaller::CFilesystemInstaller()
+  : m_addonFolder(CSpecialProtocol::TranslatePath("special://home/addons/")),
+    m_tempFolder(CSpecialProtocol::TranslatePath("special://home/addons/temp/"))
 {
-  m_addonFolder = CSpecialProtocol::TranslatePath("special://home/addons/");
-  m_tempFolder = CSpecialProtocol::TranslatePath("special://home/addons/temp/");
 }
 
 bool CFilesystemInstaller::InstallToFilesystem(const std::string& archive, const std::string& addonId)

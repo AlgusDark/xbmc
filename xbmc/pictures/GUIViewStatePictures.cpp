@@ -9,6 +9,7 @@
 #include "GUIViewStatePictures.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "filesystem/Directory.h"
 #include "guilib/LocalizeStrings.h"
@@ -80,12 +81,6 @@ VECSOURCES& CGUIViewStateWindowPictures::GetSources()
     static VECSOURCES empty;
     return empty;
   }
-
-  // Picture add-ons
-  AddAddonsSource("image", g_localizeStrings.Get(1039), "DefaultAddonPicture.png");
-
-  // Global sources
-  AddOrReplace(*pictureSources, CGUIViewState::GetSources());
 
   return *pictureSources;
 }

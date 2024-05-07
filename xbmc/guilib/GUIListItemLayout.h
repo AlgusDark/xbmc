@@ -34,6 +34,7 @@ public:
   void SetInvalid() { m_invalidated = true; }
   void FreeResources(bool immediately = false);
   void SetParentControl(CGUIControl* control) { m_group.SetParentControl(control); }
+  void AssignDepth();
 
   //#ifdef GUILIB_PYTHON_COMPATIBILITY
   void CreateListControlLayouts(float width, float height, bool focused, const CLabelInfo &labelInfo, const CLabelInfo &labelInfo2, const CTextureInfo &texture, const CTextureInfo &textureFocus, float texHeight, float iconWidth, float iconHeight, const std::string &nofocusCondition, const std::string &focusCondition);
@@ -62,7 +63,7 @@ protected:
   INFO::InfoPtr m_condition;
   KODI::GUILIB::GUIINFO::CGUIInfoBool m_isPlaying;
   std::chrono::milliseconds m_infoUpdateMillis =
-      std::chrono::milliseconds(std::numeric_limits<std::chrono::milliseconds::rep>::max());
+      XbmcThreads::EndTime<decltype(m_infoUpdateMillis)>::Max();
   XbmcThreads::EndTime<> m_infoUpdateTimeout;
 };
 

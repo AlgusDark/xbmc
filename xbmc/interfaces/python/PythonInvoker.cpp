@@ -12,23 +12,25 @@
 #include <Python.h>
 // clang-format on
 
-#include "Application.h"
 #include "PythonInvoker.h"
+
 #include "ServiceBroker.h"
 #include "addons/AddonManager.h"
+#include "addons/addoninfo/AddonInfo.h"
+#include "addons/addoninfo/AddonType.h"
 #include "dialogs/GUIDialogKaiToast.h"
-#include "filesystem/File.h"
 #include "filesystem/SpecialProtocol.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
 #include "interfaces/python/PyContext.h"
-#include "interfaces/python/XBPython.h"
 #include "interfaces/python/pythreadstate.h"
 #include "interfaces/python/swig.h"
 #include "messaging/ApplicationMessenger.h"
 #include "threads/SingleLock.h"
+#include "threads/SystemClock.h"
 #include "utils/CharsetConverter.h"
+#include "utils/FileUtils.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/XTimeUtils.h"
@@ -62,10 +64,6 @@ extern "C" FILE* fopen_utf8(const char* _Filename, const char* _Mode);
 using namespace XFILE;
 using namespace std::chrono_literals;
 
-#define PythonModulesSize sizeof(PythonModules) / sizeof(PythonModule)
-
-CCriticalSection CPythonInvoker::s_critical;
-
 static const std::string getListOfAddonClassesAsString(
     XBMCAddon::AddonClass::Ref<XBMCAddon::Python::PythonLanguageHook>& languageHook)
 {
@@ -85,30 +83,8 @@ static const std::string getListOfAddonClassesAsString(
   return message;
 }
 
-static std::vector<std::vector<wchar_t>> storeArgumentsCCompatible(
-    std::vector<std::wstring> const& input)
-{
-  std::vector<std::vector<wchar_t>> output;
-  std::transform(input.begin(), input.end(), std::back_inserter(output), [](std::wstring const& i) {
-    return std::vector<wchar_t>(i.c_str(), i.c_str() + i.length() + 1);
-  });
-
-  if (output.empty())
-    output.emplace_back(1u, '\0');
-
-  return output;
-}
-
-static std::vector<wchar_t*> getCPointersToArguments(std::vector<std::vector<wchar_t>>& input)
-{
-  std::vector<wchar_t*> output;
-  std::transform(input.begin(), input.end(), std::back_inserter(output),
-                 [](std::vector<wchar_t>& i) { return &i[0]; });
-  return output;
-}
-
 CPythonInvoker::CPythonInvoker(ILanguageInvocationHandler* invocationHandler)
-  : ILanguageInvoker(invocationHandler), m_threadState(NULL), m_stop(false)
+  : ILanguageInvoker(invocationHandler), m_threadState(NULL)
 {
 }
 
@@ -135,7 +111,7 @@ bool CPythonInvoker::Execute(
   if (script.empty())
     return false;
 
-  if (!CFile::Exists(script))
+  if (!CFileUtils::Exists(script))
   {
     CLog::Log(LOGERROR, "CPythonInvoker({}): python script \"{}\" does not exist", GetId(),
               CSpecialProtocol::TranslatePath(script));
@@ -154,22 +130,17 @@ bool CPythonInvoker::execute(const std::string& script, const std::vector<std::s
   for (const auto& argument : arguments)
   {
     std::wstring w_argument;
-    g_charsetConverter.utf8ToW(argument, w_argument);
+    g_charsetConverter.utf8ToW(argument, w_argument, false);
     w_arguments.push_back(w_argument);
   }
   return execute(script, w_arguments);
 }
 
-bool CPythonInvoker::execute(const std::string& script, const std::vector<std::wstring>& arguments)
+bool CPythonInvoker::execute(const std::string& script, std::vector<std::wstring>& arguments)
 {
   // copy the code/script into a local string buffer
   m_sourceFile = script;
-  m_pythonPath.clear();
-
-  // copy the arguments into a local buffer
-  unsigned int argc = arguments.size();
-  std::vector<std::vector<wchar_t>> argvStorage = storeArgumentsCCompatible(arguments);
-  std::vector<wchar_t*> argv = getCPointersToArguments(argvStorage);
+  std::set<std::string> pythonPath;
 
   CLog::Log(LOGDEBUG, "CPythonInvoker({}, {}): start processing", GetId(), m_sourceFile);
 
@@ -225,7 +196,7 @@ bool CPythonInvoker::execute(const std::string& script, const std::vector<std::w
 
     // get path from script file name and add python path's
     // this is used for python so it will search modules from script path first
-    addPath(scriptDir);
+    pythonPath.emplace(scriptDir);
 
     // add all addon module dependencies to path
     if (m_addon)
@@ -233,7 +204,7 @@ bool CPythonInvoker::execute(const std::string& script, const std::vector<std::w
       std::set<std::string> paths;
       getAddonModuleDeps(m_addon, paths);
       for (const auto& it : paths)
-        addPath(it);
+        pythonPath.emplace(it);
     }
     else
     { // for backwards compatibility.
@@ -245,41 +216,37 @@ bool CPythonInvoker::execute(const std::string& script, const std::vector<std::w
           "version.",
           GetId());
       ADDON::VECADDONS addons;
-      CServiceBroker::GetAddonMgr().GetAddons(addons, ADDON::ADDON_SCRIPT_MODULE);
+      CServiceBroker::GetAddonMgr().GetAddons(addons, ADDON::AddonType::SCRIPT_MODULE);
       for (unsigned int i = 0; i < addons.size(); ++i)
-        addPath(CSpecialProtocol::TranslatePath(addons[i]->LibPath()));
+        pythonPath.emplace(CSpecialProtocol::TranslatePath(addons[i]->LibPath()));
     }
 
-    // we want to use sys.path so it includes site-packages
-    // if this fails, default to using Py_GetPath
-    PyObject* sysMod(PyImport_ImportModule("sys")); // must call Py_DECREF when finished
-    PyObject* sysModDict(PyModule_GetDict(sysMod)); // borrowed ref, no need to delete
-    PyObject* pathObj(PyDict_GetItemString(sysModDict, "path")); // borrowed ref, no need to delete
+    PyObject* sysPath = PySys_GetObject("path");
 
-    if (pathObj != NULL && PyList_Check(pathObj))
+    std::for_each(pythonPath.crbegin(), pythonPath.crend(),
+                  [&sysPath](const auto& path)
+                  {
+                    PyObject* pyPath = PyUnicode_FromString(path.c_str());
+                    PyList_Insert(sysPath, 0, pyPath);
+
+                    Py_DECREF(pyPath);
+                  });
+
+    CLog::Log(LOGDEBUG, "CPythonInvoker({}): full python path:", GetId());
+
+    Py_ssize_t pathListSize = PyList_Size(sysPath);
+
+    for (Py_ssize_t index = 0; index < pathListSize; index++)
     {
-      for (int i = 0; i < PyList_Size(pathObj); i++)
-      {
-        PyObject* e = PyList_GetItem(pathObj, i); // borrowed ref, no need to delete
-        if (e != NULL && PyUnicode_Check(e))
-          addPath(PyUnicode_AsUTF8(e)); // returns internal data, don't delete or modify
-      }
+      if (index == 0 && !pythonPath.empty())
+        CLog::Log(LOGDEBUG, "CPythonInvoker({}):   custom python path:", GetId());
+
+      if (index == static_cast<ssize_t>(pythonPath.size()))
+        CLog::Log(LOGDEBUG, "CPythonInvoker({}):   default python path:", GetId());
+
+      PyObject* pyPath = PyList_GetItem(sysPath, index);
+      CLog::Log(LOGDEBUG, "CPythonInvoker({}):     {}", GetId(), PyUnicode_AsUTF8(pyPath));
     }
-    else
-    {
-      std::string GetPath;
-      g_charsetConverter.wToUTF8(Py_GetPath(), GetPath);
-      addPath(GetPath);
-    }
-
-    Py_DECREF(sysMod); // release ref to sysMod
-
-    CLog::Log(LOGDEBUG, "CPythonInvoker({}, {}): setting the Python path to {}", GetId(),
-              m_sourceFile, m_pythonPath);
-
-    std::wstring pypath;
-    g_charsetConverter.utf8ToW(m_pythonPath, pypath);
-    PySys_SetPath(pypath.c_str());
 
     { // set the m_threadState to this new interp
       std::unique_lock<CCriticalSection> lockMe(m_critical);
@@ -290,8 +257,24 @@ bool CPythonInvoker::execute(const std::string& script, const std::vector<std::w
     // swap in my thread m_threadState
     PyThreadState_Swap(m_threadState);
 
-  // initialize python's sys.argv
-  PySys_SetArgvEx(argc, &argv[0], 0);
+  PyObject* sysArgv = PyList_New(0);
+
+  if (arguments.empty())
+    arguments.emplace_back(L"");
+
+  CLog::Log(LOGDEBUG, "CPythonInvoker({}): adding args:", GetId());
+
+  for (const auto& arg : arguments)
+  {
+    PyObject* pyArg = PyUnicode_FromWideChar(arg.c_str(), arg.length());
+    PyList_Append(sysArgv, pyArg);
+    CLog::Log(LOGDEBUG, "CPythonInvoker({}):  {}", GetId(), PyUnicode_AsUTF8(pyArg));
+
+    Py_DECREF(pyArg);
+  }
+
+  PySys_SetObject("argv", sysArgv);
+  Py_DECREF(sysArgv);
 
   CLog::Log(LOGDEBUG, "CPythonInvoker({}, {}): entering source directory {}", GetId(), m_sourceFile,
             scriptDir);
@@ -510,7 +493,7 @@ bool CPythonInvoker::stop(bool abort)
       // We can't empty-spin in the main thread and expect scripts to be able to
       // dismantle themselves. Python dialogs aren't normal XBMC dialogs, they rely
       // on TMSG_GUI_PYTHON_DIALOG messages, so pump the message loop.
-      if (g_application.IsCurrentThread())
+      if (CServiceBroker::GetAppMessenger()->IsProcessThread())
       {
         CServiceBroker::GetAppMessenger()->ProcessMessages();
       }
@@ -585,6 +568,9 @@ void CPythonInvoker::onExecutionDone()
                 "shutting down the Interpreter",
                 GetId(), m_sourceFile);
 
+    // PyErr_Clear() is required to prevent the debug python library to trigger an assert() at the Py_EndInterpreter() level
+    PyErr_Clear();
+
     Py_EndInterpreter(m_threadState);
 
     // If we still have objects left around, produce an error message detailing what's been left behind
@@ -634,10 +620,6 @@ void CPythonInvoker::onExecutionFailed()
 void CPythonInvoker::onInitialization()
 {
   XBMC_TRACE;
-  {
-    GilSafeSingleLock lock(s_critical);
-    initializeModules(getModules());
-  }
 
   // get a possible initialization script
   const char* runscript = getInitializationScript();
@@ -656,15 +638,14 @@ void CPythonInvoker::onPythonModuleInitialization(void* moduleDict)
 
   PyObject* moduleDictionary = (PyObject*)moduleDict;
 
-  PyObject* pyaddonid = PyUnicode_FromString(m_addon->ID().c_str());
-  PyDict_SetItemString(moduleDictionary, "__xbmcaddonid__", pyaddonid);
+  PyDict_SetItemString(moduleDictionary, "__xbmcaddonid__",
+                       PyObjectPtr(PyUnicode_FromString(m_addon->ID().c_str())).get());
 
-  ADDON::AddonVersion version = m_addon->GetDependencyVersion("xbmc.python");
-  PyObject* pyxbmcapiversion = PyUnicode_FromString(version.asString().c_str());
-  PyDict_SetItemString(moduleDictionary, "__xbmcapiversion__", pyxbmcapiversion);
+  ADDON::CAddonVersion version = m_addon->GetDependencyVersion("xbmc.python");
+  PyDict_SetItemString(moduleDictionary, "__xbmcapiversion__",
+                       PyObjectPtr(PyUnicode_FromString(version.asString().c_str())).get());
 
-  PyObject* pyinvokerid = PyLong_FromLong(GetId());
-  PyDict_SetItemString(moduleDictionary, "__xbmcinvokerid__", pyinvokerid);
+  PyDict_SetItemString(moduleDictionary, "__xbmcinvokerid__", PyLong_FromLong(GetId()));
 
   CLog::Log(LOGDEBUG,
             "CPythonInvoker({}, {}): instantiating addon using automatically obtained id of \"{}\" "
@@ -698,32 +679,13 @@ void CPythonInvoker::onError(const std::string& exceptionType /* = "" */,
   }
 }
 
-void CPythonInvoker::initializeModules(
-    const std::map<std::string, PythonModuleInitialization>& modules)
-{
-  for (const auto& module : modules)
-  {
-    if (!initializeModule(module.second))
-      CLog::Log(LOGWARNING, "CPythonInvoker({}, {}): unable to initialize python module \"{}\"",
-                GetId(), m_sourceFile, module.first);
-  }
-}
-
-bool CPythonInvoker::initializeModule(PythonModuleInitialization module)
-{
-  if (module == NULL)
-    return false;
-
-  return module() != nullptr;
-}
-
 void CPythonInvoker::getAddonModuleDeps(const ADDON::AddonPtr& addon, std::set<std::string>& paths)
 {
   for (const auto& it : addon->GetDependencies())
   {
     //Check if dependency is a module addon
     ADDON::AddonPtr dependency;
-    if (CServiceBroker::GetAddonMgr().GetAddon(it.id, dependency, ADDON::ADDON_SCRIPT_MODULE,
+    if (CServiceBroker::GetAddonMgr().GetAddon(it.id, dependency, ADDON::AddonType::SCRIPT_MODULE,
                                                ADDON::OnlyEnabled::CHOICE_YES))
     {
       std::string path = CSpecialProtocol::TranslatePath(dependency->LibPath());
@@ -737,13 +699,8 @@ void CPythonInvoker::getAddonModuleDeps(const ADDON::AddonPtr& addon, std::set<s
   }
 }
 
-void CPythonInvoker::addPath(const std::string& path)
+void CPythonInvoker::PyObjectDeleter::operator()(PyObject* p) const
 {
-  if (path.empty())
-    return;
-
-  if (!m_pythonPath.empty())
-    m_pythonPath += PY_PATH_SEP;
-
-  m_pythonPath += path;
+  assert(Py_REFCNT(p) == 2);
+  Py_DECREF(p);
 }

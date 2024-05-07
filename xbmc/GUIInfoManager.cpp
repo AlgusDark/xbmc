@@ -8,13 +8,15 @@
 
 #include "GUIInfoManager.h"
 
-#include "Application.h"
 #include "FileItem.h"
 #include "ServiceBroker.h"
 #include "URL.h"
 #include "Util.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "cores/DataCacheCore.h"
 #include "filesystem/File.h"
+#include "games/tags/GameInfoTag.h"
 #include "guilib/guiinfo/GUIInfo.h"
 #include "guilib/guiinfo/GUIInfoHelper.h"
 #include "guilib/guiinfo/GUIInfoLabels.h"
@@ -22,8 +24,10 @@
 #include "interfaces/AnnouncementManager.h"
 #include "interfaces/info/InfoExpression.h"
 #include "messaging/ApplicationMessenger.h"
+#include "playlists/PlayListTypes.h"
 #include "settings/SkinSettings.h"
 #include "utils/CharsetConverter.h"
+#include "utils/FileUtils.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/log.h"
@@ -376,7 +380,6 @@ const infomap integer_bools[] =  {{ "isequal",          INTEGER_IS_EQUAL },
                                   { "islessorequal",    INTEGER_LESS_OR_EQUAL },
                                   { "iseven",           INTEGER_EVEN },
                                   { "isodd",            INTEGER_ODD }};
-
 
 /// \page modules__infolabels_boolean_conditions
 /// \subsection modules__infolabels_boolean_conditions_Player Player
@@ -790,18 +793,6 @@ const infomap integer_bools[] =  {{ "isequal",          INTEGER_IS_EQUAL },
 ///     @skinning_v18 **[New Infolabel]** \link Player_Icon `Player.Icon`\endlink
 ///     <p>
 ///   }
-///   \table_row3{   <b>`Player.Cutlist`</b>,
-///                  \anchor Player_Cutlist
-///                  _string_,
-///     @return The cutlist of the currently playing item as csv in the format start1\,end1\,start2\,end2\,...
-///     Tokens must have values in the range from 0.0 to 100.0. end token must be less or equal than start token.
-///     <p>
-///     @deprecated \link Player_Cutlist `Player.Cutlist`\endlink is deprecated and will be removed in the next version.
-///     <p><hr>
-///     @skinning_v19 **[New Infolabel]** \link Player_Cutlist `Player.Cutlist`\endlink
-///     @skinning_v20 \link Player_Cutlist `Player.Cutlist`\endlink is deprecated\, use \link Player_Editlist `Player.Editlist`\endlink instead
-///     <p>
-///   }
 ///   \table_row3{   <b>`Player.Editlist`</b>,
 ///                  \anchor Player_Editlist
 ///                  _string_,
@@ -848,10 +839,28 @@ const infomap integer_bools[] =  {{ "isequal",          INTEGER_IS_EQUAL },
 ///     @skinning_v19 **[New Infolabel]** \link Player_Chapters `Player.Chapters`\endlink
 ///     <p>
 ///   }
+///   \table_row3{   <b>`Player.IsExternal`</b>,
+///                  \anchor Player_IsExternal
+///                  _boolean_,
+///     @return **True** if the playing player is an external player\, **False** otherwise
+///     <p><hr>
+///     @skinning_v21 **[New Boolean Condition]** \link Player_IsExternal `Player.IsExternal`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`Player.IsRemote`</b>,
+///                  \anchor Player_IsRemote
+///                  _boolean_,
+///     @return **True** if the playing player is a remote player (e.g. UPnP)\, **False** otherwise
+///     <p><hr>
+///     @skinning_v21 **[New Boolean Condition]** \link Player_IsRemote `Player.IsRemote`\endlink
+///     <p>
+///   }
 const infomap player_labels[] = {{"hasmedia", PLAYER_HAS_MEDIA},
                                  {"hasaudio", PLAYER_HAS_AUDIO},
                                  {"hasvideo", PLAYER_HAS_VIDEO},
                                  {"hasgame", PLAYER_HAS_GAME},
+                                 {"isexternal", PLAYER_IS_EXTERNAL},
+                                 {"isremote", PLAYER_IS_REMOTE},
                                  {"playing", PLAYER_PLAYING},
                                  {"paused", PLAYER_PAUSED},
                                  {"rewinding", PLAYER_REWINDING},
@@ -866,7 +875,6 @@ const infomap player_labels[] = {{"hasmedia", PLAYER_HAS_MEDIA},
                                  {"forwarding8x", PLAYER_FORWARDING_8x},
                                  {"forwarding16x", PLAYER_FORWARDING_16x},
                                  {"forwarding32x", PLAYER_FORWARDING_32x},
-                                 {"displayafterseek", PLAYER_DISPLAY_AFTER_SEEK},
                                  {"caching", PLAYER_CACHING},
                                  {"seekbar", PLAYER_SEEKBAR},
                                  {"seeking", PLAYER_SEEKING},
@@ -899,7 +907,6 @@ const infomap player_labels[] = {{"hasmedia", PLAYER_HAS_MEDIA},
                                  {"hasresolutions", PLAYER_HAS_RESOLUTIONS},
                                  {"frameadvance", PLAYER_FRAMEADVANCE},
                                  {"icon", PLAYER_ICON},
-                                 {"cutlist", PLAYER_CUTLIST},
                                  {"editlist", PLAYER_EDITLIST},
                                  {"cuts", PLAYER_CUTS},
                                  {"scenemarkers", PLAYER_SCENE_MARKERS},
@@ -1233,6 +1240,7 @@ const infomap weather[] =        {{ "isfetched",        WEATHER_IS_FETCHED },
 ///                  \anchor System_HasNetwork
 ///                  _boolean_,
 ///     @return **True** if the Kodi host has a network available.
+///     @note This feature is NOT implemented. Always returns true
 ///     <p>
 ///   }
 ///   \table_row3{   <b>`System.HasMediadvd`</b>,
@@ -1326,6 +1334,15 @@ const infomap weather[] =        {{ "isfetched",        WEATHER_IS_FETCHED },
 ///     @skinning_v17 **[New Boolean Condition]** \link System_HasPVRAddon
 ///     `System.HasPVRAddon`\endlink <p>
 ///   }
+///   \table_row3{   <b>`System.PVRCount`</b>,
+///                  \anchor System_PVRCount
+///                  _integer_,
+///     @return Number of PVR clients enabled.
+///     @note If a PVR is enabled but unreachable\, it is still counted.
+///     <p><hr>
+///     @skinning_v22 **[New Integer Value]** \link System_PVRCount `System.PVRCount`\endlink
+///     <p>
+///   }
 ///   \table_row3{   <b>`System.HasCMS`</b>,
 ///                  \anchor System_HasCMS
 ///                  _boolean_,
@@ -1402,6 +1419,14 @@ const infomap weather[] =        {{ "isfetched",        WEATHER_IS_FETCHED },
 ///                  _boolean_,
 ///     @return **True** if Kodi is running on an android device.
 ///     <p>
+///   }
+///   \table_row3{   <b>`System.Platform.WebOS`</b>,
+///                  \anchor System_PlatformWebOS
+///                  _boolean_,
+///     @return **True** if Kodi is running on a WebOS device.
+///     <p><hr>
+///     @skinning_v21 **[New Boolean Condition]** \link System_PlatformWebOS
+///     `System.Platform.WebOS`\endlink <p>
 ///   }
 ///   \table_row3{   <b>`System.CanPowerDown`</b>,
 ///                  \anchor System_CanPowerDown
@@ -1737,6 +1762,21 @@ const infomap weather[] =        {{ "isfetched",        WEATHER_IS_FETCHED },
 ///     @return the current language.
 ///     <p>
 ///   }
+///   \table_row3{   <b>`System.Locale(type)`</b>,
+///                  \anchor System_Locale
+///                  _string_,
+///     @return Locale-specific information depending on the requested type.
+///     @param type - Can be one of the following:
+///       - <b>region</b> The currently selected region name within the selected language ( \link System_Language `System.Language` \endlink).
+///       - <b>iso</b> The country code of the currently selected region as specified in <a href="https://kodi.wiki/view/Language_support#What_is_langinfo.xml">langinfo.xml</a>.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link System_Locale
+///     `System.Locale(type)`\endlink
+///     <p>
+///     @skinning_v22 **[Removed options]** `timezonecountry` and `timezone` from \link System_Locale
+///     `System.Locale(type)`\endlink
+///     <p>
+///   }
 ///   \table_row3{   <b>`System.ProfileName`</b>,
 ///                  \anchor System_ProfileName
 ///                  _string_,
@@ -1944,6 +1984,7 @@ const infomap system_labels[] = {
     {"hascms", SYSTEM_HAS_CMS},
     {"privacypolicy", SYSTEM_PRIVACY_POLICY},
     {"haspvraddon", SYSTEM_HAS_PVR_ADDON},
+    {"pvrcount", SYSTEM_PVR_COUNT},
     {"addonupdatecount", SYSTEM_ADDON_UPDATE_COUNT},
     {"supportscpuusage", SYSTEM_SUPPORTS_CPU_USAGE},
     {"supportedhdrtypes", SYSTEM_SUPPORTED_HDR_TYPES},
@@ -1992,6 +2033,14 @@ const infomap system_labels[] = {
 ///                  \anchor System_Setting
 ///                  _boolean_,
 ///     @return **True** if 'hide watched items' is selected.
+///     <p>
+///   }
+///   \table_row3{   <b>`System.Setting(hideunwatchedepisodethumbs)`</b>,
+///                  \anchor System_Setting_HideUnwatchedEpisodeThumbs
+///                  _boolean_,
+///     @return **True** if 'hide unwatched episode setting is enabled'\, **False** otherwise.
+///     <p><hr>
+///     @skinning_v20 **[New Boolean Condition]** \link System_Setting_HideUnwatchedEpisodeThumbs `System.Setting(hideunwatchedepisodethumbs)`\endlink
 ///     <p>
 ///   }
 /// \table_end
@@ -2057,24 +2106,21 @@ const infomap system_param[] =   {{ "hasalarm",         SYSTEM_HAS_ALARM },
 ///     @return The network DNS 2 address.
 ///     <p>
 ///   }
-///   \table_row3{   <b>`Network.DHCPAddress`</b>,
-///                  \anchor Network_DHCPAddress
-///                  _string_,
-///     @return The DHCP IP address.
-///     <p>
-///   }
 /// \table_end
 ///
 /// -----------------------------------------------------------------------------
-const infomap network_labels[] = {{ "isdhcp",            NETWORK_IS_DHCP },
-                                  { "ipaddress",         NETWORK_IP_ADDRESS }, //labels from here
-                                  { "linkstate",         NETWORK_LINK_STATE },
-                                  { "macaddress",        NETWORK_MAC_ADDRESS },
-                                  { "subnetmask",        NETWORK_SUBNET_MASK },
-                                  { "gatewayaddress",    NETWORK_GATEWAY_ADDRESS },
-                                  { "dns1address",       NETWORK_DNS1_ADDRESS },
-                                  { "dns2address",       NETWORK_DNS2_ADDRESS },
-                                  { "dhcpaddress",       NETWORK_DHCP_ADDRESS }};
+// clang-format off
+const infomap network_labels[] = {
+    {"isdhcp", NETWORK_IS_DHCP},
+    {"ipaddress", NETWORK_IP_ADDRESS}, //labels from here
+    {"linkstate", NETWORK_LINK_STATE},
+    {"macaddress", NETWORK_MAC_ADDRESS},
+    {"subnetmask", NETWORK_SUBNET_MASK},
+    {"gatewayaddress", NETWORK_GATEWAY_ADDRESS},
+    {"dns1address", NETWORK_DNS1_ADDRESS},
+    {"dns2address", NETWORK_DNS2_ADDRESS}
+};
+// clang-format on
 
 /// \page modules__infolabels_boolean_conditions
 /// \subsection modules__infolabels_boolean_conditions_musicpartymode Music party mode
@@ -2919,6 +2965,13 @@ const infomap musicplayer[] =    {{ "title",            MUSICPLAYER_TITLE },
 ///     library or from a plugin (eg director/plot etc.)
 ///     <p>
 ///   }
+///   \table_row3{   <b>`VideoPlayer.HasVideoVersions`</b>,
+///                  \anchor VideoPlayer_HasVideoVersions
+///                  _boolean_,
+///     @return **True** when the played item has multiple video versions.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link VideoPlayer_HasVideoVersions `VideoPlayer.HasVideoVersions`\endlink
+///   }
 ///   \table_row3{   <b>`VideoPlayer.Content(parameter)`</b>,
 ///                  \anchor VideoPlayer_Content
 ///                  _boolean_,
@@ -3316,6 +3369,35 @@ const infomap musicplayer[] =    {{ "title",            MUSICPLAYER_TITLE },
 ///     @return The MPAA rating of the video which has an offset `number` with respect to the start of the playlist.
 ///     <p><hr>
 ///     @skinning_v19 **[New Infolabel]** \link VideoPlayer_Position_mpaa `VideoPlayer.position(number).mpaa`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`VideoPlayer.Art(type)`</b>,
+///                  \anchor VideoPlayer_art
+///                  _string_,
+///     @return The art path for the requested arttype and for the currently playing video.
+///     @param type - can virtually be anything\, refers to the art type keyword in the art map (poster\, fanart\, banner\, thumb\, etc)
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link VideoPlayer_art `VideoPlayer.Art(type)`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`VideoPlayer.offset(number).Art(type)`</b>,
+///                  \anchor VideoPlayer_Offset_art
+///                  _string_,
+///     @return The art path for the requested arttype and for the video which has an offset `number` with respect to the currently playing video.
+///     @param number - the offset with respect to the start of the playlist
+///     @param type - can virtually be anything\, refers to the art type keyword in the art map (poster\, fanart\, banner\, thumb\, etc)
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link VideoPlayer_Offset_mpaa `VideoPlayer.offset(number).Art(type)`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`VideoPlayer.position(number).Art(type)`</b>,
+///                  \anchor VideoPlayer_position_art
+///                  _string_,
+///     @return The art path for the requested arttype and for the video which has an offset `number` with respect to the start of the playlist.
+///     @param number - the offset with respect to the start of the playlist
+///     @param type - can virtually be anything\, refers to the art type keyword in the art map (poster\, fanart\, banner\, thumb\, etc)
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link VideoPlayer_position_art `VideoPlayer.position(number).Art(type)`\endlink
 ///     <p>
 ///   }
 ///   \table_row3{   <b>`VideoPlayer.IMDBNumber`</b>,
@@ -3848,17 +3930,25 @@ const infomap musicplayer[] =    {{ "title",            MUSICPLAYER_TITLE },
 ///     @skinning_v20 **[New Infolabel]** \link VideoPlayer_AudioStreamCount `VideoPlayer.AudioStreamCount`\endlink
 ///     <p>
 ///   }
-///   \table_row3{   <b>`VideoPlayer.HdrType`</b>,
-///                  \anchor VideoPlayer_HdrType
-///                  _string_,
-///     @return String containing the name of the detected HDR type or empty if not HDR. See \ref StreamHdrType for the list of possible values.
-///     <p><hr>
-///     @skinning_v20 **[New Infolabel]** \link VideoPlayer_HdrType `VideoPlayer.HdrType`\endlink
+///   \table_row3{   <b>`VideoPlayer.HdrType`</b>,
+///                  \anchor VideoPlayer_HdrType
+///                  _string_,
+///     @return String containing the name of the detected HDR type or empty if not HDR. See \ref StreamHdrType for the list of possible values.
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link VideoPlayer_HdrType `VideoPlayer.HdrType`\endlink
 ///     <p>
-///   }
+///   }
+///   \table_row3{   <b>`VideoPlayer.VideoVersionName`</b>,
+///                  \anchor VideoPlayer_VideoVersionName
+///                  _string_,
+///     @return String containing the version name of the currently playing video (movie) - empty if not a movie, version name is not set or not a version
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link VideoPlayer_VideoVersionName `VideoPlayer.VideoVersionName`\endlink
+///   }
 /// \table_end
 ///
 /// -----------------------------------------------------------------------------
+// clang-format off
 const infomap videoplayer[] =    {{ "title",            VIDEOPLAYER_TITLE },
                                   { "genre",            VIDEOPLAYER_GENRE },
                                   { "country",          VIDEOPLAYER_COUNTRY },
@@ -3930,7 +4020,11 @@ const infomap videoplayer[] =    {{ "title",            VIDEOPLAYER_TITLE },
                                   { "tvshowdbid",       VIDEOPLAYER_TVSHOWDBID },
                                   { "audiostreamcount", VIDEOPLAYER_AUDIOSTREAMCOUNT },
                                   { "hdrtype",          VIDEOPLAYER_HDR_TYPE },
+                                  { "art",              VIDEOPLAYER_ART},
+                                  { "videoversionname", VIDEOPLAYER_VIDEOVERSION_NAME},
+                                  { "hasvideoversions", VIDEOPLAYER_HAS_VIDEOVERSIONS}
 };
+// clang-format on
 
 /// \page modules__infolabels_boolean_conditions
 /// \subsection modules__infolabels_boolean_conditions_RetroPlayer RetroPlayer
@@ -3941,8 +4035,8 @@ const infomap videoplayer[] =    {{ "title",            VIDEOPLAYER_TITLE },
 ///                  _string_,
 ///     @return The video filter of the currently-playing game.
 ///     The following values are possible:
-///       - nearest (Nearest neighbor\, i.e. pixelate)
-///       - linear (Bilinear filtering\, i.e. smooth blur)
+///       - <b>`nearest`</b> (Nearest neighbor\, i.e. pixelate)
+///       - <b>`linear`</b> (Bilinear filtering\, i.e. smooth blur)
 ///     <p><hr>
 ///     @skinning_v18 **[New Infolabel]** \link RetroPlayer_VideoFilter `RetroPlayer.VideoFilter`\endlink
 ///     <p>
@@ -3952,10 +4046,10 @@ const infomap videoplayer[] =    {{ "title",            VIDEOPLAYER_TITLE },
 ///                  _string_,
 ///     @return The stretch mode of the currently-playing game.
 ///     The following values are possible:
-///       - normal (Show the game normally)
-///       - 4:3 (Stretch to a 4:3 aspect ratio)
-///       - fullscreen (Stretch to the full viewing area)
-///       - original (Shrink to the original resolution)
+///       - <b>`normal`</b> (Show the game normally)
+///       - <b>`4:3`</b> (Stretch to a 4:3 aspect ratio)
+///       - <b>`fullscreen`</b> (Stretch to the full viewing area)
+///       - <b>`original`</b> (Shrink to the original resolution)
 ///     <p><hr>
 ///     @skinning_v18 **[New Infolabel]** \link RetroPlayer_StretchMode `RetroPlayer.StretchMode`\endlink
 ///     <p>
@@ -3966,10 +4060,10 @@ const infomap videoplayer[] =    {{ "title",            VIDEOPLAYER_TITLE },
 ///     @return The video rotation of the currently-playing game
 ///     in degrees counter-clockwise.
 ///     The following values are possible:
-///       - 0
-///       - 90 (Shown in the GUI as 270 degrees)
-///       - 180
-///       - 270 (Shown in the GUI as 90 degrees)
+///       - <b>`0`</b>
+///       - <b>`90`</b> (Shown in the GUI as 270 degrees)
+///       - <b>`180`</b>
+///       - <b>`270`</b> (Shown in the GUI as 90 degrees)
 ///     <p><hr>
 ///     @skinning_v18 **[New Infolabel]** \link RetroPlayer_VideoRotation `RetroPlayer.VideoRotation`\endlink
 ///     <p>
@@ -5020,6 +5114,14 @@ const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
 ///     currently selected tvshow or season\, based on the the current watched filter.
 ///     <p>
 ///   }
+///   \table_row3{   <b>`ListItem.Property(WatchedEpisodePercent)`</b>,
+///                  \anchor ListItem_Property_WatchedEpisodePercent
+///                  _string_,
+///     @return The percentage of watched episodes in the tvshow (watched/total*100) or season.
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link ListItem_Property_WatchedEpisodePercent `ListItem.Property(WatchedEpisodePercent)`\endlink
+///     <p>
+///   }
 ///   \table_row3{   <b>`ListItem.PictureAperture`</b>,
 ///                  \anchor ListItem_PictureAperture
 ///                  _string_,
@@ -5108,6 +5210,8 @@ const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
 ///                  \anchor ListItem_PictureColour
 ///                  _string_,
 ///     @return Whether the selected picture is "Colour" or "Black and White".
+///     <p>
+///     @deprecated \link ListItem_PictureColour `ListItem.PictureColour`\endlink is deprecated and will be removed in future Kodi versions
 ///     <p><hr>
 ///     @skinning_v13 **[New Infolabel]** \link ListItem_PictureColour `ListItem.PictureColour`\endlink
 ///     <p>
@@ -5426,6 +5530,8 @@ const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
 ///                  \anchor ListItem_PictureProcess
 ///                  _string_,
 ///     @return The process used to compress the selected picture.
+///     <p>
+///     @deprecated \link ListItem_PictureProcess `ListItem.PictureProcess`\endlink is deprecated and will be removed in future Kodi versions
 ///     <p><hr>
 ///     @skinning_v13 **[New Infolabel]** \link ListItem_PictureProcess `ListItem.PictureProcess`\endlink
 ///     <p>
@@ -6386,7 +6492,6 @@ const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
 ///     replaces `ListItem.AddonBroken`.
 ///     <p>
 ///   }
-
 ///   \table_row3{   <b>`ListItem.AddonType`</b>,
 ///                  \anchor ListItem_AddonType
 ///                  _string_,
@@ -6664,6 +6769,14 @@ const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
 ///     @return The parental rating of the list item (PVR).
 ///     <p>
 ///   }
+///   \table_row3{   <b>`ListItem.ParentalRatingCode`</b>,
+///                  \anchor ListItem_ParentalRatingCode
+///                  _string_,
+///     @return The parental rating code (eg: 'PG'\, etc) of the list item (PVR).
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_ParentalRatingCode `ListItem.ParentalRatingCode`\endlink
+///     <p>
+///   }
 ///   \table_row3{   <b>`ListItem.CurrentItem`</b>,
 ///                  \anchor ListItem_CurrentItem
 ///                  _string_,
@@ -6801,16 +6914,74 @@ const infomap container_str[]  = {{ "property",         CONTAINER_PROPERTY },
 ///     <p><hr>
 ///     @skinning_v19 **[New Infolabel]** \link ListItem_AlbumStatus `ListItem.AlbumStatus`\endlink
 ///   }
-///   \table_row3{   <b>`ListItem.HdrType`</b>,
-///                  \anchor ListItem_HdrType
-///                  _string_,
-///     @return String containing the name of the detected HDR type or empty if not HDR. See \ref StreamHdrType for the list of possible values.
-///     <p><hr>
-///     @skinning_v20 **[New Infolabel]** \link ListItem_HdrType `ListItem.HdrType`\endlink
-///   }
+///   \table_row3{   <b>`ListItem.HdrType`</b>,
+///                  \anchor ListItem_HdrType
+///                  _string_,
+///     @return String containing the name of the detected HDR type or empty if not HDR. See \ref StreamHdrType for the list of possible values.
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link ListItem_HdrType `ListItem.HdrType`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.SongVideoURL`</b>,
+///                  \anchor ListItem_SongVideoURL
+///                  _string_,
+///     @return Link to a video of a song
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_SongVideoURL `ListItem.SongVideoURL`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.BackendInstanceName`</b>,
+///                  \anchor ListItem_BackendInstanceName
+///                  _string_,
+///     @return The name used by the PVR client addon instance for the selected item.
+///     <p><hr>
+///     @skinning_v22 **[New Infolabel]** \link ListItem_BackendInstanceName `ListItem.BackendInstanceName`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`ListItem.VideoWidth`</b>,
+///                  \anchor ListItem_VideoWidth
+///                  _string_,
+///     @return String containing width of video in pixels - empty if unknown.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_VideoWidth `ListItem.VideoWidth`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.VideoHeight`</b>,
+///                  \anchor ListItem_VideoHeight
+///                  _string_,
+///     @return String containing height of video in pixels - empty if unknown.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_VideoHeight `ListItem.VideoHeight`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.HasVideoVersions`</b>,
+///                  \anchor ListItem_HasVideoVersions
+///                  _boolean_,
+///     @return **True** when the selected item has multiple video versions.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_HasVideoVersions `ListItem.HasVideoVersions`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.IsVideoExtra`</b>,
+///                  \anchor ListItem_IsVideoExtra
+///                  _boolean_,
+///     @return **True** when the selected item is a video extra.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_IsVideoExtra `ListItem.IsVideoExtra`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.VideoVersionName`</b>,
+///                  \anchor ListItem_VideoVersionName
+///                  _string_,
+///     @return String containing the name of the version of a video - empty for extras or if no version available
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_VideoVersionName `ListItem.VideoVersionName`\endlink
+///   }
+///   \table_row3{   <b>`ListItem.HasVideoExtras`</b>,
+///                  \anchor ListItem_HasVideoExtras
+///                  _boolean_,
+///     @return **True** when the selected item has video extras.
+///     <p><hr>
+///     @skinning_v21 **[New Infolabel]** \link ListItem_HasVideoExtras `ListItem.HasVideoExtras`\endlink
+///   }
 /// \table_end
 ///
 /// -----------------------------------------------------------------------------
+// clang-format off
 const infomap listitem_labels[]= {{ "thumb",            LISTITEM_THUMB },
                                   { "icon",             LISTITEM_ICON },
                                   { "actualicon",       LISTITEM_ACTUAL_ICON },
@@ -6924,6 +7095,8 @@ const infomap listitem_labels[]= {{ "thumb",            LISTITEM_THUMB },
                                   { "setid",            LISTITEM_SETID },
                                   { "videocodec",       LISTITEM_VIDEO_CODEC },
                                   { "videoresolution",  LISTITEM_VIDEO_RESOLUTION },
+                                  { "videowidth",       LISTITEM_VIDEO_WIDTH},
+                                  { "videoheight",      LISTITEM_VIDEO_HEIGHT},
                                   { "videoaspect",      LISTITEM_VIDEO_ASPECT },
                                   { "audiocodec",       LISTITEM_AUDIO_CODEC },
                                   { "audiochannels",    LISTITEM_AUDIO_CHANNELS },
@@ -7002,6 +7175,7 @@ const infomap listitem_labels[]= {{ "thumb",            LISTITEM_THUMB },
                                   { "art",              LISTITEM_ART },
                                   { "property",         LISTITEM_PROPERTY },
                                   { "parentalrating",   LISTITEM_PARENTAL_RATING },
+                                  { "parentalratingcode", LISTITEM_PARENTAL_RATING_CODE },
                                   { "currentitem",      LISTITEM_CURRENTITEM },
                                   { "isnew",            LISTITEM_IS_NEW },
                                   { "isboxset",         LISTITEM_IS_BOXSET },
@@ -7020,7 +7194,14 @@ const infomap listitem_labels[]= {{ "thumb",            LISTITEM_THUMB },
                                   { "albumstatus",      LISTITEM_ALBUMSTATUS },
                                   { "isautoupdateable", LISTITEM_ISAUTOUPDATEABLE },
                                   { "hdrtype",          LISTITEM_VIDEO_HDR_TYPE },
+                                  { "songvideourl",     LISTITEM_SONG_VIDEO_URL },
+                                  { "hasvideoversions", LISTITEM_HASVIDEOVERSIONS },
+                                  { "isvideoextra",     LISTITEM_ISVIDEOEXTRA },
+                                  { "videoversionname", LISTITEM_VIDEOVERSION_NAME },
+                                  { "hasvideoextras",   LISTITEM_HASVIDEOEXTRAS },
+                                  { "backendinstancename", LISTITEM_BACKEND_INSTANCE_NAME },
 };
+// clang-format on
 
 /// \page modules__infolabels_boolean_conditions
 /// \subsection modules__infolabels_boolean_conditions_Visualisation Visualisation
@@ -7179,6 +7360,24 @@ const infomap fanart_labels[] =  {{ "color1",           FANART_COLOR1 },
 ///     @sa \link Skin_SetNumeric `Skin.SetNumeric(settingid)`\endlink
 ///     <p><hr>
 ///     @skinning_v20 **[New Infolabel]** \link Skin_Numeric `Skin.Numeric(settingid)`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`Skin.TimerElapsedSecs(timer)`</b>,
+///                  \anchor Skin_TimerElapsedSecs
+///                  _integer_ \, _string_,
+///     @return The elapsed time in seconds for the provided `timer`.
+///     @param timer - the timer name
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link Skin_TimerElapsedSecs `Skin.TimerElapsedSecs(timer)`\endlink
+///     <p>
+///   }
+///   \table_row3{   <b>`Skin.TimerIsRunning(timer)`</b>,
+///                  \anchor Skin_TimerIsRunning
+///                  _boolean_,
+///     @return **True** if the given `timer` is active\, false otherwise.
+///     @param timer - the timer name
+///     <p><hr>
+///     @skinning_v20 **[New Infolabel]** \link Skin_TimerIsRunning `Skin.TimerIsRunning(timer)`\endlink
 ///     <p>
 ///   }
 /// \table_end
@@ -8013,6 +8212,7 @@ const infomap playlist[] =       {{ "length",           PLAYLIST_LENGTH },
 ///     <p>
 ///   }
 ///
+// clang-format off
 const infomap pvr[] =            {{ "isrecording",              PVR_IS_RECORDING },
                                   { "hastimer",                 PVR_HAS_TIMER },
                                   { "hastvchannels",            PVR_HAS_TV_CHANNELS },
@@ -8092,6 +8292,7 @@ const infomap pvr[] =            {{ "isrecording",              PVR_IS_RECORDING
                                   { "timeshiftprogressbufferstart", PVR_TIMESHIFT_PROGRESS_BUFFER_START },
                                   { "timeshiftprogressbufferend", PVR_TIMESHIFT_PROGRESS_BUFFER_END },
                                   { "epgeventicon",               PVR_EPG_EVENT_ICON }};
+// clang-format on
 
 /// \page modules__infolabels_boolean_conditions
 ///   \table_row3{   <b>`PVR.EpgEventDuration`</b>,
@@ -8337,7 +8538,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///   \table_row3{   <b>`RDS.HasRadioText`</b>,
 ///                  \anchor RDS_HasRadioText
 ///                  _boolean_,
-///     @return **True** if RDS contains also Radiotext.
+///     @return **True** if RDS contains also RadioText.
 ///     <p><hr>
 ///     @skinning_v16 **[New Boolean Condition]** \link RDS_HasRadioText `RDS.HasRadioText`\endlink
 ///     <p>
@@ -8345,7 +8546,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///   \table_row3{   <b>`RDS.HasRadioTextPlus`</b>,
 ///                  \anchor RDS_HasRadioTextPlus
 ///                  _boolean_,
-///     @return **True** if RDS with Radiotext contains also the plus information.
+///     @return **True** if RDS with RadioText contains also the plus information.
 ///     <p><hr>
 ///     @skinning_v16 **[New Boolean Condition]** \link RDS_HasRadioTextPlus `RDS.HasRadioTextPlus`\endlink
 ///     <p>
@@ -8354,7 +8555,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_HasHotline
 ///                  _boolean_,
 ///     @return **True** if a hotline phone number is present.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Boolean Condition]** \link RDS_HasHotline `RDS.HasHotline`\endlink
 ///     <p>
@@ -8363,7 +8564,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_HasStudio
 ///                  _boolean_,
 ///     @return **True** if a studio name is present.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Boolean Condition]** \link RDS_HasStudio `RDS.HasStudio`\endlink
 ///     <p>
@@ -8398,7 +8599,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_Title
 ///                  _string_,
 ///     @return The title of item; e.g. track title of an album.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Title `RDS.Title`\endlink
 ///     <p>
@@ -8407,7 +8608,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_Artist
 ///                  _string_,
 ///     @return A person or band/collective generally considered responsible for the work.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Artist `RDS.Artist`\endlink
 ///     <p>
@@ -8416,7 +8617,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_Band
 ///                  _string_,
 ///     @return The band/orchestra/musician.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Band `RDS.Band`\endlink
 ///     <p>
@@ -8425,7 +8626,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_Composer
 ///                  _string_,
 ///     @return The name of the original composer/author.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Composer `RDS.Composer`\endlink
 ///     <p>
@@ -8435,7 +8636,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  _string_,
 ///     @return The artist(s) who performed the work. In classical music this would be
 ///     the conductor.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Conductor `RDS.Conductor`\endlink
 ///     <p>
@@ -8444,7 +8645,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_Album
 ///                  _string_,
 ///     @return The album of the song.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Album `RDS.Album`\endlink
 ///     <p>
@@ -8454,7 +8655,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  _string_,
 ///     @return The track number of the item on the album on which it was originally
 ///     released.
-///     @note Only be available on RadiotextPlus
+///     @note Only be available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_TrackNumber `RDS.TrackNumber`\endlink
 ///     <p>
@@ -8508,7 +8709,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_Comment
 ///                  _string_,
 ///     @return The radio station comment string if available.
-///     @note Only available on RadiotextPlus)
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_Comment `RDS.Comment`\endlink
 ///     <p>
@@ -8517,7 +8718,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoNews
 ///                  _string_,
 ///     @return The message / headline (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoNews `RDS.InfoNews`\endlink
 ///     <p>
@@ -8526,7 +8727,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoNewsLocal
 ///                  _string_,
 ///     @return The local information news sended from radio channel (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoNewsLocal `RDS.InfoNewsLocal`\endlink
 ///     <p>
@@ -8536,7 +8737,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  _string_,
 ///     @return The stock information; either as one part or as several distinct parts:
 ///     "name 99latest value 99change 99high 99low 99volume" (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoStock `RDS.InfoStock`\endlink
 ///     <p>
@@ -8545,7 +8746,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoStockSize
 ///                  _string_,
 ///     @return The number of rows present in stock information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoStockSize `RDS.InfoStockSize`\endlink
 ///     <p>
@@ -8555,7 +8756,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  _string_,
 ///     @return The result of a match; either as one part or as several distinct parts:
 ///     "match 99result"\, e.g. "Bayern München : Borussia 995:5"  (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoSport `RDS.InfoSport`\endlink
 ///     <p>
@@ -8564,7 +8765,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoSportSize
 ///                  _string_,
 ///     @return The number of rows present in sport information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoSportSize `RDS.InfoSportSize`\endlink
 ///     <p>
@@ -8573,7 +8774,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoLottery
 ///                  _string_,
 ///     @return The raffle / lottery: "key word 99values" (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoLottery `RDS.InfoLottery`\endlink
 ///     <p>
@@ -8582,7 +8783,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoLotterySize
 ///                  _string_,
 ///     @return The number of rows present in lottery information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoLotterySize `RDS.InfoLotterySize`\endlink
 ///     <p>
@@ -8591,7 +8792,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoWeather
 ///                  _string_,
 ///     @return The weather information (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoWeather `RDS.InfoWeather`\endlink
 ///     <p>
@@ -8600,7 +8801,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoWeatherSize
 ///                  _string_,
 ///     @return The number of rows present in weather information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoWeatherSize `RDS.InfoWeatherSize`\endlink
 ///     <p>
@@ -8609,7 +8810,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoCinema
 ///                  _string_,
 ///     @return The information about movies in cinema (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoCinema `RDS.InfoCinema`\endlink
 ///     <p>
@@ -8618,7 +8819,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoCinemaSize
 ///                  _string_,
 ///     @return The number of rows present in cinema information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoCinemaSize `RDS.InfoCinemaSize`\endlink
 ///     <p>
@@ -8628,7 +8829,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  _string_,
 ///     @return The horoscope; either as one part or as two distinct parts:
 ///     "key word 99text"\, e.g. "sign of the zodiac 99blablabla" (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoHoroscope `RDS.InfoHoroscope`\endlink
 ///     <p>
@@ -8637,7 +8838,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoHoroscopeSize
 ///                  _string_,
 ///     @return The Number of rows present in horoscope information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoHoroscopeSize `RDS.InfoHoroscopeSize`\endlink
 ///     <p>
@@ -8646,7 +8847,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoOther
 ///                  _string_,
 ///     @return Other information\, not especially specified: "key word 99info" (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoOther `RDS.InfoOther`\endlink
 ///     <p>
@@ -8655,7 +8856,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_InfoOtherSize
 ///                  _string_,
 ///     @return The number of rows present with other information.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_InfoOtherSize `RDS.InfoOtherSize`\endlink
 ///     <p>
@@ -8699,7 +8900,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_ProgEditStaff
 ///                  _string_,
 ///     @return The name of the editorial staff; e.g. name of editorial journalist.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_ProgEditStaff `RDS.ProgEditStaff`\endlink
 ///     <p>
@@ -8708,7 +8909,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_ProgHomepage
 ///                  _string_,
 ///     @return The Link to radio station homepage
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_ProgHomepage `RDS.ProgHomepage`\endlink
 ///     <p>
@@ -8725,7 +8926,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_PhoneHotline
 ///                  _string_,
 ///     @return The telephone number of the radio station's hotline.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_PhoneHotline `RDS.PhoneHotline`\endlink
 ///     <p>
@@ -8734,7 +8935,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_PhoneStudio
 ///                  _string_,
 ///     @return The telephone number of the radio station's studio.
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_PhoneStudio `RDS.PhoneStudio`\endlink
 ///     <p>
@@ -8744,7 +8945,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  _string_,
 ///     @return The sms number of the radio stations studio (to send directly a sms to
 ///     the studio) (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_SmsStudio `RDS.SmsStudio`\endlink
 ///     <p>
@@ -8753,7 +8954,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_EmailHotline
 ///                  _string_,
 ///     @return The email address of the radio stations hotline (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_EmailHotline `RDS.EmailHotline`\endlink
 ///     <p>
@@ -8762,7 +8963,7 @@ const infomap pvr_times[] =      {{ "epgeventduration",       PVR_EPG_EVENT_DURA
 ///                  \anchor RDS_EmailStudio
 ///                  _string_,
 ///     @return The email address of the radio station's studio (if available).
-///     @note Only available on RadiotextPlus
+///     @note Only available on RadioText Plus
 ///     <p><hr>
 ///     @skinning_v16 **[New Infolabel]** \link RDS_EmailStudio `RDS.EmailStudio`\endlink
 ///     <p>
@@ -8944,6 +9145,8 @@ const infomap rds[] =            {{ "hasrds",                   RDS_HAS_RDS },
 ///     @return the colour of the picture. It can have one of the following values:
 ///       - <b>"Colour"</b>
 ///       - <b>"Black and White"</b>
+///     <p>
+///     @deprecated Slideshow_Colour `Slideshow.Colour`\endlink is deprecated and will be removed in future Kodi versions
 ///     <p><hr>
 ///     @skinning_v13 **[New Infolabel]** \link Slideshow_Colour `Slideshow.Colour`\endlink
 ///     <p>
@@ -9273,6 +9476,8 @@ const infomap rds[] =            {{ "hasrds",                   RDS_HAS_RDS },
 ///                  \anchor Slideshow_Process
 ///                  _string_,
 ///     @return The process used to compress the current picture.
+///     <p>
+///     @deprecated \link Slideshow_Process `Slideshow.Process`\endlink is deprecated and will be removed in future Kodi versions
 ///     <p><hr>
 ///     @skinning_v13 **[New Infolabel]** \link Slideshow_Process `Slideshow.Process`\endlink
 ///     <p>
@@ -9643,9 +9848,23 @@ const infomap slideshow[] =      {{ "ispaused",               SLIDESHOW_ISPAUSED
 ///
 /// -----------------------------------------------------------------------------
 
-
 /// \page modules__infolabels_boolean_conditions
 /// \section modules_rm_infolabels_booleans Additional revision history for Infolabels and Boolean Conditions
+/// <hr>
+/// \subsection modules_rm_infolabels_booleans_v22 Kodi v22
+/// @skinning_v22 **[Removed Infolabels]** The following infolabels have been removed:
+///   - `Player.Cutlist` - Please use \link Player_Editlist `Player.EditList`\endlink for the EDL list and \link Player_Cuts `Player.Cuts`\endlink for the cut markers
+///
+/// <hr>
+/// \subsection modules_rm_infolabels_booleans_v21 Kodi v21 (Omega)
+/// @skinning_v21 **[Removed Infolabels]** The following infolabels have been removed:
+///   - `Network.DHCPAddress` - this info did not return any meaningful value (always an empty string)
+///
+/// <hr>
+/// \subsection modules_rm_infolabels_booleans_v20 Kodi v20 (Nexus)
+/// @skinning_v20 **[Removed Boolean conditions]** The following boolean conditions have been removed:
+///   - `Player.DisplayAfterSeek` - use \link Player_HasPerformedSeek `Player.HasPerformedSeek(interval)`\endlink instead
+///
 /// <hr>
 /// \subsection modules_rm_infolabels_booleans_v19 Kodi v19 (Matrix)
 /// @skinning_v19 **[Removed Infolabels]** The following infolabels have been removed:
@@ -9783,7 +10002,7 @@ void CGUIInfoManager::SplitInfoString(const std::string &infoString, std::vector
       if (!property.empty()) // add our property and parameters
       {
         StringUtils::ToLower(property);
-        info.emplace_back(Property(property, param));
+        info.emplace_back(property, param);
       }
       property.clear();
       param.clear();
@@ -9801,7 +10020,7 @@ void CGUIInfoManager::SplitInfoString(const std::string &infoString, std::vector
   if (!property.empty())
   {
     StringUtils::ToLower(property);
-    info.emplace_back(Property(property, param));
+    info.emplace_back(property, param);
   }
 }
 
@@ -10027,6 +10246,17 @@ int CGUIInfoManager::TranslateSingleString(const std::string &strCondition, bool
         }
         else if (prop.name == "idletime")
           return AddMultiInfo(CGUIInfo(SYSTEM_IDLE_TIME, atoi(param.c_str())));
+        else if (prop.name == "locale")
+        {
+          if (param == "region")
+          {
+            return SYSTEM_LOCALE_REGION;
+          }
+          else if (param == "iso")
+          {
+            return SYSTEM_LOCALE;
+          }
+        }
       }
       if (prop.name == "alarmlessorequal" && prop.num_params() == 2)
         return AddMultiInfo(CGUIInfo(SYSTEM_ALARM_LESS_OR_EQUAL, prop.param(0), atoi(prop.param(1).c_str())));
@@ -10135,6 +10365,10 @@ int CGUIInfoManager::TranslateSingleString(const std::string &strCondition, bool
       {
         return AddMultiInfo(CGUIInfo(VIDEOPLAYER_UNIQUEID, prop.param(), 0));
       }
+      if (prop.name == "art" && prop.num_params() > 0)
+      {
+        return AddMultiInfo(CGUIInfo(VIDEOPLAYER_ART, prop.param(), 0));
+      }
       return TranslateVideoPlayerString(prop.name);
     }
     else if (cat.name == "retroplayer")
@@ -10237,6 +10471,10 @@ int CGUIInfoManager::TranslateSingleString(const std::string &strCondition, bool
           return AddMultiInfo(CGUIInfo(SKIN_BOOL, CSkinSettings::GetInstance().TranslateBool(prop.param(0))));
         else if (prop.name == "hastheme")
           return AddMultiInfo(CGUIInfo(SKIN_HAS_THEME, prop.param(0)));
+        else if (prop.name == "timerisrunning")
+          return AddMultiInfo(CGUIInfo(SKIN_TIMER_IS_RUNNING, prop.param(0)));
+        else if (prop.name == "timerelapsedsecs")
+          return AddMultiInfo(CGUIInfo(SKIN_TIMER_ELAPSEDSECS, prop.param(0)));
       }
     }
     else if (cat.name == "window")
@@ -10294,13 +10532,13 @@ int CGUIInfoManager::TranslateSingleString(const std::string &strCondition, bool
           return ret;
         else
         {
-          int playlistid = PLAYLIST_NONE;
+          PLAYLIST::Id playlistid = PLAYLIST::TYPE_NONE;
           if (StringUtils::EqualsNoCase(prop.param(), "video"))
-            playlistid = PLAYLIST_VIDEO;
+            playlistid = PLAYLIST::TYPE_VIDEO;
           else if (StringUtils::EqualsNoCase(prop.param(), "music"))
-            playlistid = PLAYLIST_MUSIC;
+            playlistid = PLAYLIST::TYPE_MUSIC;
 
-          if (playlistid > PLAYLIST_NONE)
+          if (playlistid != PLAYLIST::TYPE_NONE)
             return AddMultiInfo(CGUIInfo(ret, playlistid, 1));
         }
       }
@@ -10351,6 +10589,8 @@ int CGUIInfoManager::TranslateSingleString(const std::string &strCondition, bool
         return SYSTEM_PLATFORM_DARWIN_TVOS;
       else if (platform == "android")
         return SYSTEM_PLATFORM_ANDROID;
+      else if (platform == "webos")
+        return SYSTEM_PLATFORM_WEBOS;
     }
     if (info[0].name == "musicplayer")
     { //! @todo these two don't allow duration(foo) and also don't allow more than this number of levels...
@@ -10373,13 +10613,18 @@ int CGUIInfoManager::TranslateSingleString(const std::string &strCondition, bool
       {
         int position = atoi(info[1].param().c_str());
         int value = TranslateVideoPlayerString(info[2].name); // videoplayer.position(foo).bar
-        return AddMultiInfo(CGUIInfo(value, 2, position)); // 2 => absolute (0 used for not set)
+        // additional param for the requested infolabel, e.g. VideoPlayer.Position(1).Art(poster): art is the value, poster is the param
+        const std::string& param = info[2].param();
+        return AddMultiInfo(
+            CGUIInfo(value, 2, position, param)); // 2 => absolute (0 used for not set)
       }
       else if (info[1].name == "offset")
       {
         int position = atoi(info[1].param().c_str());
         int value = TranslateVideoPlayerString(info[2].name); // videoplayer.offset(foo).bar
-        return AddMultiInfo(CGUIInfo(value, 1, position)); // 1 => relative
+        // additional param for the requested infolabel, e.g. VideoPlayer.Offset(1).Art(poster): art is the value, poster is the param
+        const std::string& param = info[2].param();
+        return AddMultiInfo(CGUIInfo(value, 1, position, param)); // 1 => relative
       }
     }
     else if (info[0].name == "player")
@@ -10572,7 +10817,7 @@ std::string CGUIInfoManager::GetLabel(int info, int contextWindow, std::string *
   }
   else if (info >= LISTITEM_START && info <= LISTITEM_END)
   {
-    const CGUIListItemPtr item = GUIINFO::GetCurrentListItem(contextWindow);
+    const std::shared_ptr<CGUIListItem> item = GUIINFO::GetCurrentListItem(contextWindow);
     if (item && item->IsFileItem())
       return GetItemLabel(static_cast<CFileItem*>(item.get()), contextWindow, info, fallback);
   }
@@ -10590,7 +10835,7 @@ bool CGUIInfoManager::GetInt(int &value, int info, int contextWindow, const CGUI
   }
   else if (info >= LISTITEM_START && info <= LISTITEM_END)
   {
-    CGUIListItemPtr itemPtr;
+    std::shared_ptr<CGUIListItem> itemPtr;
     if (!item)
     {
       itemPtr = GUIINFO::GetCurrentListItem(contextWindow);
@@ -10620,12 +10865,20 @@ INFO::InfoPtr CGUIInfoManager::Register(const std::string &expression, int conte
     res = m_bools.insert(std::make_shared<InfoSingle>(condition, context, m_refreshCounter));
 
   if (res.second)
-    res.first->get()->Initialize();
+    res.first->get()->Initialize(this);
 
   return *(res.first);
 }
 
-bool CGUIInfoManager::EvaluateBool(const std::string &expression, int contextWindow /* = 0 */, const CGUIListItemPtr &item /* = nullptr */)
+void CGUIInfoManager::UnRegister(const INFO::InfoPtr& expression)
+{
+  std::unique_lock<CCriticalSection> lock(m_critInfo);
+  m_bools.erase(expression);
+}
+
+bool CGUIInfoManager::EvaluateBool(const std::string& expression,
+                                   int contextWindow /* = 0 */,
+                                   const std::shared_ptr<CGUIListItem>& item /* = nullptr */)
 {
   INFO::InfoPtr info = Register(expression, contextWindow);
   if (info)
@@ -10640,7 +10893,7 @@ bool CGUIInfoManager::GetBool(int condition1, int contextWindow, const CGUIListI
 
   if (condition >= LISTITEM_START && condition < LISTITEM_END)
   {
-    CGUIListItemPtr itemPtr;
+    std::shared_ptr<CGUIListItem> itemPtr;
     if (!item)
     {
       itemPtr = GUIINFO::GetCurrentListItem(contextWindow);
@@ -10669,7 +10922,7 @@ bool CGUIInfoManager::GetMultiInfoBool(const CGUIInfo &info, int contextWindow, 
 
   if (condition >= LISTITEM_START && condition <= LISTITEM_END)
   {
-    CGUIListItemPtr itemPtr;
+    std::shared_ptr<CGUIListItem> itemPtr;
     if (!item)
     {
       itemPtr = GUIINFO::GetCurrentListItem(contextWindow, info.GetData1(), info.GetData2(), info.GetInfoFlag());
@@ -10710,7 +10963,7 @@ bool CGUIInfoManager::GetMultiInfoBool(const CGUIInfo &info, int contextWindow, 
           if (info.GetData2() < 0) // info labels are stored with negative numbers
           {
             int info2 = -info.GetData2();
-            CGUIListItemPtr item2;
+            std::shared_ptr<CGUIListItem> item2;
 
             if (IsListItemInfo(info2))
             {
@@ -10815,7 +11068,7 @@ bool CGUIInfoManager::GetMultiInfoInt(int &value, const CGUIInfo &info, int cont
   }
   else if (info.m_info >= LISTITEM_START && info.m_info <= LISTITEM_END)
   {
-    CGUIListItemPtr itemPtr;
+    std::shared_ptr<CGUIListItem> itemPtr;
     if (!item)
     {
       itemPtr = GUIINFO::GetCurrentListItem(contextWindow, info.GetData1(), info.GetData2(), info.GetInfoFlag());
@@ -10850,7 +11103,8 @@ std::string CGUIInfoManager::GetMultiInfoLabel(const CGUIInfo &constinfo, int co
 
   if (info.m_info >= LISTITEM_START && info.m_info <= LISTITEM_END)
   {
-    const CGUIListItemPtr item = GUIINFO::GetCurrentListItem(contextWindow, info.GetData1(), info.GetData2(), info.GetInfoFlag());
+    const std::shared_ptr<CGUIListItem> item = GUIINFO::GetCurrentListItem(
+        contextWindow, info.GetData1(), info.GetData2(), info.GetInfoFlag());
     if (item)
     {
       // Image prioritizes images over labels (in the case of music item ratings for instance)
@@ -10895,7 +11149,7 @@ std::string CGUIInfoManager::GetImage(int info, int contextWindow, std::string *
            info == LISTITEM_OVERLAY ||
            info == LISTITEM_ART)
   {
-    const CGUIListItemPtr item = GUIINFO::GetCurrentListItem(contextWindow);
+    const std::shared_ptr<CGUIListItem> item = GUIINFO::GetCurrentListItem(contextWindow);
     if (item && item->IsFileItem())
       return GetItemImage(item.get(), contextWindow, info, fallback);
   }
@@ -10926,7 +11180,7 @@ void CGUIInfoManager::SetCurrentItem(const CFileItem &item)
 
 void CGUIInfoManager::SetCurrentAlbumThumb(const std::string &thumbFileName)
 {
-  if (XFILE::CFile::Exists(thumbFileName))
+  if (CFileUtils::Exists(thumbFileName))
     m_currentFile->SetArt("thumb", thumbFileName);
   else
   {
@@ -10969,9 +11223,11 @@ void CGUIInfoManager::UpdateAVInfo()
     AudioStreamInfo audio;
     SubtitleStreamInfo subtitle;
 
-    g_application.GetAppPlayer().GetVideoStreamInfo(CURRENT_STREAM, video);
-    g_application.GetAppPlayer().GetAudioStreamInfo(CURRENT_STREAM, audio);
-    g_application.GetAppPlayer().GetSubtitleStreamInfo(CURRENT_STREAM, subtitle);
+    auto& components = CServiceBroker::GetAppComponents();
+    const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+    appPlayer->GetVideoStreamInfo(CURRENT_STREAM, video);
+    appPlayer->GetAudioStreamInfo(CURRENT_STREAM, audio);
+    appPlayer->GetSubtitleStreamInfo(CURRENT_STREAM, subtitle);
 
     m_infoProviders.UpdateAVInfo(audio, video, subtitle);
   }
@@ -11211,13 +11467,13 @@ void CGUIInfoManager::ResetCache()
 void CGUIInfoManager::SetCurrentVideoTag(const CVideoInfoTag &tag)
 {
   m_currentFile->SetFromVideoInfoTag(tag);
-  m_currentFile->m_lStartOffset = 0;
+  m_currentFile->SetStartOffset(0);
 }
 
 void CGUIInfoManager::SetCurrentSongTag(const MUSIC_INFO::CMusicInfoTag &tag)
 {
   m_currentFile->SetFromMusicInfoTag(tag);
-  m_currentFile->m_lStartOffset = 0;
+  m_currentFile->SetStartOffset(0);
 }
 
 const MUSIC_INFO::CMusicInfoTag* CGUIInfoManager::GetCurrentSongTag() const
@@ -11232,6 +11488,14 @@ const CVideoInfoTag* CGUIInfoManager::GetCurrentMovieTag() const
 {
   if (m_currentFile->HasVideoInfoTag())
     return m_currentFile->GetVideoInfoTag();
+
+  return nullptr;
+}
+
+const KODI::GAME::CGameInfoTag* CGUIInfoManager::GetCurrentGameTag() const
+{
+  if (m_currentFile->HasGameInfoTag())
+    return m_currentFile->GetGameInfoTag();
 
   return nullptr;
 }

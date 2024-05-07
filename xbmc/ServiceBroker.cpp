@@ -8,7 +8,8 @@
 
 #include "ServiceBroker.h"
 
-#include "Application.h"
+#include "ServiceManager.h"
+#include "application/Application.h"
 #include "profiles/ProfileManager.h"
 #include "settings/SettingsComponent.h"
 #include "utils/log.h"
@@ -20,7 +21,6 @@
 using namespace KODI;
 
 CServiceBroker::CServiceBroker()
-  : m_pGUI(nullptr), m_pWinSystem(nullptr), m_pActiveAE(nullptr), m_decoderFilterManager(nullptr)
 {
 }
 
@@ -54,6 +54,11 @@ CLog& CServiceBroker::GetLogging()
 void CServiceBroker::CreateLogging()
 {
   g_serviceBroker.m_logging = std::make_unique<CLog>();
+}
+
+bool CServiceBroker::IsLoggingUp()
+{
+  return g_serviceBroker.m_logging ? true : false;
 }
 
 void CServiceBroker::DestroyLogging()
@@ -116,7 +121,7 @@ WSDiscovery::IWSDiscovery& CServiceBroker::GetWSDiscovery()
 }
 #endif
 
-#if !defined(TARGET_WINDOWS) && defined(HAS_DVD_DRIVE)
+#if !defined(TARGET_WINDOWS) && defined(HAS_OPTICAL_DRIVE)
 MEDIA_DETECT::CDetectDVDMedia& CServiceBroker::GetDetectDVDMedia()
 {
   return g_application.m_ServiceManager->GetDetectDVDMedia();
@@ -213,7 +218,7 @@ CNetworkBase& CServiceBroker::GetNetwork()
   return g_application.m_ServiceManager->GetNetwork();
 }
 
-bool CServiceBroker::IsBinaryAddonCacheUp()
+bool CServiceBroker::IsAddonInterfaceUp()
 {
   return g_application.m_ServiceManager && g_application.m_ServiceManager->init_level > 1;
 }
@@ -266,6 +271,11 @@ CDatabaseManager& CServiceBroker::GetDatabaseManager()
   return g_application.m_ServiceManager->GetDatabaseManager();
 }
 
+CSlideShowDelegator& CServiceBroker::GetSlideShowDelegator()
+{
+  return g_application.m_ServiceManager->GetSlideShowDelegator();
+}
+
 CEventLog* CServiceBroker::GetEventLog()
 {
   if (!g_serviceBroker.m_pSettingsComponent)
@@ -281,6 +291,11 @@ CEventLog* CServiceBroker::GetEventLog()
 CMediaManager& CServiceBroker::GetMediaManager()
 {
   return g_application.m_ServiceManager->GetMediaManager();
+}
+
+CApplicationComponents& CServiceBroker::GetAppComponents()
+{
+  return g_application;
 }
 
 CGUIComponent* CServiceBroker::GetGUI()
@@ -398,7 +413,7 @@ std::shared_ptr<KODI::MESSAGING::CApplicationMessenger> CServiceBroker::GetAppMe
 }
 
 void CServiceBroker::RegisterKeyboardLayoutManager(
-    const std::shared_ptr<CKeyboardLayoutManager>& keyboardLayoutManager)
+    const std::shared_ptr<KEYBOARD::CKeyboardLayoutManager>& keyboardLayoutManager)
 {
   g_serviceBroker.m_keyboardLayoutManager = keyboardLayoutManager;
 }
@@ -408,7 +423,7 @@ void CServiceBroker::UnregisterKeyboardLayoutManager()
   g_serviceBroker.m_keyboardLayoutManager.reset();
 }
 
-std::shared_ptr<CKeyboardLayoutManager> CServiceBroker::GetKeyboardLayoutManager()
+std::shared_ptr<KEYBOARD::CKeyboardLayoutManager> CServiceBroker::GetKeyboardLayoutManager()
 {
   return g_serviceBroker.m_keyboardLayoutManager;
 }

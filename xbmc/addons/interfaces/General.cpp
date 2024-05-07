@@ -8,16 +8,18 @@
 
 #include "General.h"
 
-#include "Application.h"
 #include "CompileInfo.h"
 #include "LangInfo.h"
 #include "ServiceBroker.h"
+#include "addons/AddonManager.h"
+#include "addons/AddonVersion.h"
 #include "addons/binary-addons/AddonDll.h"
-#include "addons/gui/GUIDialogAddonSettings.h"
 #include "addons/kodi-dev-kit/include/kodi/General.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPowerHandling.h"
 #include "dialogs/GUIDialogKaiToast.h"
-#include "input/KeyboardLayout.h"
-#include "input/KeyboardLayoutManager.h"
+#include "input/keyboard/KeyboardLayout.h"
+#include "input/keyboard/KeyboardLayoutManager.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "utils/CharsetConverter.h"
@@ -30,7 +32,8 @@
 #include <string.h>
 
 using namespace kodi; // addon-dev-kit namespace
-using KODI::UTILITY::CDigest;
+using namespace KODI;
+using UTILITY::CDigest;
 
 namespace ADDON
 {
@@ -302,7 +305,9 @@ int Interface_General::get_global_idle_time(void* kodiBase)
     return -1;
   }
 
-  return g_application.GlobalIdleTime();
+  auto& components = CServiceBroker::GetAppComponents();
+  const auto appPower = components.GetComponent<CApplicationPowerHandling>();
+  return appPower->GlobalIdleTime();
 }
 
 bool Interface_General::is_addon_avilable(void* kodiBase,
@@ -322,7 +327,7 @@ bool Interface_General::is_addon_avilable(void* kodiBase,
   }
 
   AddonPtr addonInfo;
-  if (!CServiceBroker::GetAddonMgr().GetAddon(id, addonInfo, ADDON_UNKNOWN, OnlyEnabled::CHOICE_NO))
+  if (!CServiceBroker::GetAddonMgr().GetAddon(id, addonInfo, OnlyEnabled::CHOICE_NO))
     return false;
 
   *version = strdup(addonInfo->Version().asString().c_str());
@@ -398,17 +403,17 @@ bool Interface_General::get_keyboard_layout(void* kodiBase, char** layout_name, 
 
   std::string activeLayout = CServiceBroker::GetSettingsComponent()->GetSettings()->GetString(CSettings::SETTING_LOCALE_ACTIVEKEYBOARDLAYOUT);
 
-  CKeyboardLayout layout;
+  KEYBOARD::CKeyboardLayout layout;
   if (!CServiceBroker::GetKeyboardLayoutManager()->GetLayout(activeLayout, layout))
     return false;
 
   *layout_name = strdup(layout.GetName().c_str());
 
-  unsigned int modifiers = CKeyboardLayout::ModifierKeyNone;
+  unsigned int modifiers = KEYBOARD::CKeyboardLayout::ModifierKeyNone;
   if (modifier_key & STD_KB_MODIFIER_KEY_SHIFT)
-    modifiers |= CKeyboardLayout::ModifierKeyShift;
+    modifiers |= KEYBOARD::CKeyboardLayout::ModifierKeyShift;
   if (modifier_key & STD_KB_MODIFIER_KEY_SYMBOL)
-    modifiers |= CKeyboardLayout::ModifierKeySymbol;
+    modifiers |= KEYBOARD::CKeyboardLayout::ModifierKeySymbol;
 
   for (unsigned int row = 0; row < STD_KB_BUTTONS_MAX_ROWS; row++)
   {
@@ -432,10 +437,11 @@ bool Interface_General::change_keyboard_layout(void* kodiBase, char** layout_nam
     return false;
   }
 
-  std::vector<CKeyboardLayout> layouts;
+  std::vector<KEYBOARD::CKeyboardLayout> layouts;
   unsigned int currentLayout = 0;
 
-  const KeyboardLayouts& keyboardLayouts = CServiceBroker::GetKeyboardLayoutManager()->GetLayouts();
+  const KEYBOARD::KeyboardLayouts& keyboardLayouts =
+      CServiceBroker::GetKeyboardLayoutManager()->GetLayouts();
   const std::shared_ptr<CSettings> settings = CServiceBroker::GetSettingsComponent()->GetSettings();
   std::vector<CVariant> layoutNames = settings->GetList(CSettings::SETTING_LOCALE_KEYBOARDLAYOUTS);
   std::string activeLayout = settings->GetString(CSettings::SETTING_LOCALE_ACTIVEKEYBOARDLAYOUT);
@@ -454,7 +460,8 @@ bool Interface_General::change_keyboard_layout(void* kodiBase, char** layout_nam
   currentLayout++;
   if (currentLayout >= layouts.size())
     currentLayout = 0;
-  CKeyboardLayout layout = layouts.empty() ? CKeyboardLayout() : layouts[currentLayout];
+  KEYBOARD::CKeyboardLayout layout =
+      layouts.empty() ? KEYBOARD::CKeyboardLayout() : layouts[currentLayout];
   CServiceBroker::GetSettingsComponent()->GetSettings()->SetString(CSettings::SETTING_LOCALE_ACTIVEKEYBOARDLAYOUT, layout.GetName());
 
   *layout_name = strdup(layout.GetName().c_str());

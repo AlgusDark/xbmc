@@ -35,7 +35,6 @@
 #include <androidjni/View.h>
 
 // forward declares
-class CJNIWakeLock;
 class CAESinkAUDIOTRACK;
 class CVariant;
 class IInputDeviceCallbacks;
@@ -82,7 +81,7 @@ private:
 };
 
 class CXBMCApp : public IActivityHandler,
-                 public CJNIMainActivity,
+                 public jni::CJNIMainActivity,
                  public CJNIBroadcastReceiver,
                  public ANNOUNCEMENT::IAnnouncer,
                  public CJNISurfaceHolderCallback
@@ -126,8 +125,6 @@ public:
 
   bool isValid() { return m_activity != NULL; }
 
-  int32_t GetSDKVersion() const { return m_activity->sdkVersion; }
-
   void onStart() override;
   void onResume() override;
   void onPause() override;
@@ -156,10 +153,18 @@ public:
   static int android_printf(const char *format, ...);
 
   int GetBatteryLevel() const;
-  bool EnableWakeLock(bool on);
+  void KeepScreenOn(bool on);
   bool HasFocus() const { return m_hasFocus; }
 
-  static bool StartActivity(const std::string &package, const std::string &intent = std::string(), const std::string &dataType = std::string(), const std::string &dataURI = std::string());
+  static bool StartActivity(const std::string& package,
+                            const std::string& intent = std::string(),
+                            const std::string& dataType = std::string(),
+                            const std::string& dataURI = std::string(),
+                            const std::string& flags = std::string(),
+                            const std::string& extras = std::string(),
+                            const std::string& action = std::string(),
+                            const std::string& category = std::string(),
+                            const std::string& className = std::string());
   std::vector<androidPackage> GetApplications() const;
 
   /*!
@@ -174,7 +179,6 @@ public:
   static float GetSystemVolume();
   static void SetSystemVolume(float percent);
 
-  void SetRefreshRate(float rate);
   void SetDisplayMode(int mode, float rate);
   int GetDPI() const;
 
@@ -228,28 +232,31 @@ private:
 
   CXBMCApp(ANativeActivity* nativeActivity, IInputHandler& inputhandler);
 
-  CJNIXBMCAudioManagerOnAudioFocusChangeListener m_audioFocusListener;
-  CJNIXBMCDisplayManagerDisplayListener m_displayListener;
-  std::unique_ptr<CJNIXBMCMainView> m_mainView;
+  jni::CJNIXBMCAudioManagerOnAudioFocusChangeListener m_audioFocusListener;
+  jni::CJNIXBMCDisplayManagerDisplayListener m_displayListener;
+  std::unique_ptr<jni::CJNIXBMCMainView> m_mainView;
   std::unique_ptr<jni::CJNIXBMCMediaSession> m_mediaSession;
   std::string GetFilenameFromIntent(const CJNIIntent &intent);
 
   void run();
   void stop();
   void SetupEnv();
-  static void SetRefreshRateCallback(void* rateVariant);
   static void SetDisplayModeCallback(void* modeVariant);
+  static void KeepScreenOnCallback(void* onVariant);
 
   static void RegisterDisplayListenerCallback(void*);
   void UnregisterDisplayListener();
 
   ANativeActivity* m_activity{nullptr};
   IInputHandler& m_inputHandler;
-  std::unique_ptr<CJNIWakeLock> m_wakeLock;
   int m_batteryLevel{0};
   bool m_hasFocus{false};
   bool m_headsetPlugged{false};
   bool m_hdmiSource{false};
+  bool m_wakeUp{false};
+  bool m_aeReset{false};
+  bool m_hdmiPlugged{true};
+  bool m_mediaSessionUpdated{false};
   IInputDeviceCallbacks* m_inputDeviceCallbacks{nullptr};
   IInputDeviceEventHandler* m_inputDeviceEventHandler{nullptr};
   bool m_hasReqVisible{false};
@@ -271,6 +278,9 @@ private:
 
   bool XBMC_DestroyDisplay();
   bool XBMC_SetupDisplay();
+
+  void OnSleep();
+  void OnWakeup();
 
   uint32_t m_playback_state{0};
   int64_t m_frameTimeNanos{0};

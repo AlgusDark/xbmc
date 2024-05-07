@@ -1,23 +1,23 @@
-include ../../Makefile.include
-DEPS = ../../Makefile.include Makefile ../../download-files.include
-
-# lib name, version
-LIBNAME=xz
-VERSION=5.2.5
-SOURCE=$(LIBNAME)-$(VERSION)
-ARCHIVE=$(SOURCE).tar.gz
-SHA512=7443674247deda2935220fbc4dfc7665e5bb5a260be8ad858c8bd7d7b9f0f868f04ea45e62eb17c0a5e6a2de7c7500ad2d201e2d668c48ca29bd9eea5a73a3ce
-include ../../download-files.include
+include ../../Makefile.include XZ-VERSION ../../download-files.include
+DEPS = ../../Makefile.include Makefile XZ-VERSION ../../download-files.include
 
 # configuration settings
-CONFIGURE=./configure --prefix=$(PREFIX) --disable-shared --disable-assembler --disable-lzmainfo --disable-lzma-links --disable-scripts --disable-doc
+CONFIGURE=./configure --prefix=$(PREFIX) \
+                      --disable-shared \
+                      --disable-assembler \
+                      --disable-xz \
+                      --disable-xzdec \
+                      --disable-lzmadec \
+                      --disable-lzmainfo \
+                      --disable-lzma-links \
+                      --disable-scripts \
+                      --disable-doc
 
-LIBDYLIB=$(PLATFORM)/src/liblzma/liblzma.a
+LIBDYLIB=$(PLATFORM)/src/liblzma/.libs/liblzma.a
 
 all: .installed-$(PLATFORM)
 
-
-$(PLATFORM): $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE) $(DEPS)
+$(PLATFORM): $(DEPS) | $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE)
 	rm -rf $(PLATFORM)/*; mkdir -p $(PLATFORM)
 	cd $(PLATFORM); $(ARCHIVE_TOOL) $(ARCHIVE_TOOL_FLAGS) $(TARBALLS_LOCATION)/$(ARCHIVE)
 	cd $(PLATFORM); $(CONFIGURE)

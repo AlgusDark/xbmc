@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2005-2018 Team Kodi
+ *  Copyright (C) 2005-2024 Team Kodi
  *  This file is part of Kodi - https://kodi.tv
  *
  *  SPDX-License-Identifier: GPL-2.0-or-later
@@ -11,6 +11,7 @@
 #include "GLShader.h"
 #include "rendering/RenderSystem.h"
 #include "utils/ColorUtils.h"
+#include "utils/Map.h"
 
 #include <map>
 #include <memory>
@@ -26,52 +27,40 @@ enum class ShaderMethodGL
   SM_TEXTURE_LIM,
   SM_MULTI,
   SM_FONTS,
+  SM_FONTS_SHADER_CLIP,
   SM_TEXTURE_NOBLEND,
-  SM_MULTI_BLENDCOLOR
+  SM_MULTI_BLENDCOLOR,
+  SM_MAX
 };
 
 template<>
 struct fmt::formatter<ShaderMethodGL> : fmt::formatter<std::string_view>
 {
-
-public:
-  static constexpr auto toString(ShaderMethodGL method)
-  {
-    switch (method)
-    {
-      case ShaderMethodGL::SM_DEFAULT:
-        return "default";
-        break;
-      case ShaderMethodGL::SM_TEXTURE:
-        return "texture";
-        break;
-      case ShaderMethodGL::SM_TEXTURE_LIM:
-        return "texture limited";
-        break;
-      case ShaderMethodGL::SM_MULTI:
-        return "multi";
-        break;
-      case ShaderMethodGL::SM_FONTS:
-        return "fonts";
-        break;
-      case ShaderMethodGL::SM_TEXTURE_NOBLEND:
-        return "texture no blending";
-        break;
-      case ShaderMethodGL::SM_MULTI_BLENDCOLOR:
-        return "multi blend colour";
-        break;
-      default:
-        return "unknown";
-        break;
-    }
-  }
-
   template<typename FormatContext>
   constexpr auto format(const ShaderMethodGL& shaderMethod, FormatContext& ctx)
   {
-    auto shaderName = toString(shaderMethod);
-    return fmt::formatter<std::string_view>::format(shaderName, ctx);
+    const auto it = ShaderMethodGLMap.find(shaderMethod);
+    if (it == ShaderMethodGLMap.cend())
+      throw std::range_error("no string mapping found for shader method");
+
+    return fmt::formatter<string_view>::format(it->second, ctx);
   }
+
+private:
+  static constexpr auto ShaderMethodGLMap = make_map<ShaderMethodGL, std::string_view>({
+      {ShaderMethodGL::SM_DEFAULT, "default"},
+      {ShaderMethodGL::SM_TEXTURE, "texture"},
+      {ShaderMethodGL::SM_TEXTURE_LIM, "texture limited"},
+      {ShaderMethodGL::SM_MULTI, "multi"},
+      {ShaderMethodGL::SM_FONTS, "fonts"},
+      {ShaderMethodGL::SM_FONTS_SHADER_CLIP, "fonts with vertex shader based clipping"},
+      {ShaderMethodGL::SM_TEXTURE_NOBLEND, "texture no blending"},
+      {ShaderMethodGL::SM_MULTI_BLENDCOLOR, "multi blend colour"},
+  });
+
+  static_assert(static_cast<size_t>(ShaderMethodGL::SM_MAX) == ShaderMethodGLMap.size(),
+                "ShaderMethodGLMap doesn't match the size of ShaderMethodGL, did you forget to "
+                "add/remove a mapping?");
 };
 
 class CRenderSystemGL : public CRenderSystemBase
@@ -86,6 +75,7 @@ public:
   bool BeginRender() override;
   bool EndRender() override;
   void PresentRender(bool rendered, bool videoLayer) override;
+  void InvalidateColorBuffer() override;
   bool ClearBuffers(UTILS::COLOR::Color color) override;
   bool IsExtSupported(const char* extension) const override;
 
@@ -99,6 +89,8 @@ public:
   CRect ClipRectToScissorRect(const CRect &rect) override;
   void SetScissors(const CRect &rect) override;
   void ResetScissors() override;
+
+  void SetDepthCulling(DEPTH_CULLING culling) override;
 
   void CaptureStateBlock() override;
   void ApplyStateBlock() override;
@@ -125,8 +117,12 @@ public:
   GLint ShaderGetCol();
   GLint ShaderGetCoord0();
   GLint ShaderGetCoord1();
+  GLint ShaderGetDepth();
   GLint ShaderGetUniCol();
   GLint ShaderGetModel();
+  GLint ShaderGetMatrix();
+  GLint ShaderGetClip();
+  GLint ShaderGetCoordStep();
 
 protected:
   virtual void SetVSyncImpl(bool enable) = 0;

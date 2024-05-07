@@ -8,8 +8,9 @@
 
 #include "LIRC.h"
 
-#include "AppInboundProtocol.h"
 #include "ServiceBroker.h"
+#include "application/AppInboundProtocol.h"
+#include "input/keymaps/remote/IRTranslator.h"
 #include "profiles/ProfileManager.h"
 #include "settings/AdvancedSettings.h"
 #include "settings/Settings.h"
@@ -23,10 +24,14 @@
 #include <lirc/lirc_client.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <unistd.h>
 
+#include "PlatformDefs.h"
+
+using namespace KODI;
 using namespace std::chrono_literals;
 
-CLirc::CLirc() : CThread("Lirc")
+CLirc::CLirc() : CThread("Lirc"), m_irTranslator(std::make_unique<KEYMAP::CIRTranslator>())
 {
 }
 
@@ -60,7 +65,7 @@ void CLirc::Process()
     CThread::Sleep(1000ms);
 
   m_profileId = settingsComponent->GetProfileManager()->GetCurrentProfileId();
-  m_irTranslator.Load("Lircmap.xml");
+  m_irTranslator->Load("Lircmap.xml");
 
   // make sure work-around (CheckDaemon) uses the same socket path as lirc_init
   const char* socket_path = getenv("LIRC_SOCKET_PATH");
@@ -106,7 +111,7 @@ void CLirc::Process()
         if (m_profileId != profileId)
         {
           m_profileId = profileId;
-          m_irTranslator.Load("Lircmap.xml");
+          m_irTranslator->Load("Lircmap.xml");
         }
         ProcessCode(code);
         free(code);
@@ -138,7 +143,7 @@ void CLirc::ProcessCode(char *buf)
     buttonName[buttonNameLen - 2] = '\0';
   }
 
-  int button = m_irTranslator.TranslateButton(deviceName, buttonName);
+  int button = m_irTranslator->TranslateButton(deviceName, buttonName);
 
   char *end = nullptr;
   long repeat = strtol(repeatStr, &end, 16);

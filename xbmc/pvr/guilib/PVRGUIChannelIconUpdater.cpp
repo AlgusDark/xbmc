@@ -9,10 +9,10 @@
 #include "PVRGUIChannelIconUpdater.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "Util.h"
 #include "filesystem/Directory.h"
-#include "filesystem/File.h"
 #include "guilib/LocalizeStrings.h"
 #include "pvr/channels/PVRChannel.h"
 #include "pvr/channels/PVRChannelGroup.h"
@@ -21,10 +21,12 @@
 #include "settings/AdvancedSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
+#include "utils/FileUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/log.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -57,8 +59,8 @@ void CPVRGUIChannelIconUpdater::SearchAndUpdateMissingChannelIcons() const
 
   std::unique_ptr<CPVRGUIProgressHandler> progressHandler;
   if (!m_groups.empty())
-    progressHandler.reset(
-        new CPVRGUIProgressHandler(g_localizeStrings.Get(19286))); // Searching for channel icons
+    progressHandler = std::make_unique<CPVRGUIProgressHandler>(
+        g_localizeStrings.Get(19286)); // Searching for channel icons
 
   for (const auto& group : m_groups)
   {
@@ -71,7 +73,7 @@ void CPVRGUIChannelIconUpdater::SearchAndUpdateMissingChannelIcons() const
       progressHandler->UpdateProgress(channel->ChannelName(), channelIndex++, members.size());
 
       // skip if an icon is already set and exists
-      if (XFILE::CFile::Exists(channel->IconPath()))
+      if (CFileUtils::Exists(channel->IconPath()))
         continue;
 
       // reset icon before searching for a new one

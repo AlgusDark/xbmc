@@ -9,8 +9,10 @@
 #include "AddonUpdateRules.h"
 
 #include "AddonDatabase.h"
+#include "addons/addoninfo/AddonInfo.h"
 #include "utils/log.h"
 
+#include <algorithm>
 #include <mutex>
 
 using namespace ADDON;

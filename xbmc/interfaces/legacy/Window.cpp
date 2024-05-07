@@ -8,16 +8,19 @@
 
 #include "Window.h"
 
-#include "Application.h"
 #include "ServiceBroker.h"
 #include "WindowException.h"
 #include "WindowInterceptor.h"
+#include "application/Application.h"
 #include "guilib/GUIButtonControl.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIEditControl.h"
 #include "guilib/GUIRadioButtonControl.h"
 #include "guilib/GUIWindowManager.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "messaging/ApplicationMessenger.h"
+#include "utils/StringUtils.h"
 #include "utils/Variant.h"
 
 #define ACTIVE_WINDOW CServiceBroker::GetGUI()->GetWindowManager().GetActiveWindow()
@@ -133,7 +136,7 @@ namespace XBMCAddon
       //! @todo rework locking
       // Python GIL and CServiceBroker::GetWinSystem()->GetGfxContext() are deadlock happy
       // dispose is called from GUIWindowManager and in this case DelayGuard must not be used.
-      if (!g_application.IsCurrentThread())
+      if (!CServiceBroker::GetAppMessenger()->IsProcessThread())
       {
         SingleLockWithDelayGuard gslock(CServiceBroker::GetWinSystem()->GetGfxContext(), languageHook);
       }
@@ -549,20 +552,24 @@ namespace XBMCAddon
           throw WindowException("Control does not exist in window");
       }
 
+      CGUIMessage msg(GUI_MSG_REMOVE_CONTROL, 0, 0);
+      msg.SetPointer(pControl->pGUIControl);
+      CServiceBroker::GetAppMessenger()->SendGUIMessage(msg, iWindowId, wait);
+
       // delete control from vecControls in window object
-      std::vector<AddonClass::Ref<Control> >::iterator it = vecControls.begin();
+      std::vector<AddonClass::Ref<Control>>::iterator it = vecControls.begin();
       while (it != vecControls.end())
       {
         AddonClass::Ref<Control> control = (*it);
         if (control->iControlId == pControl->iControlId)
         {
           it = vecControls.erase(it);
-        } else ++it;
+        }
+        else
+        {
+          ++it;
+        }
       }
-
-      CGUIMessage msg(GUI_MSG_REMOVE_CONTROL, 0, 0);
-      msg.SetPointer(pControl->pGUIControl);
-      CServiceBroker::GetAppMessenger()->SendGUIMessage(msg, iWindowId, wait);
 
       // initialize control to zero
       pControl->pGUIControl = NULL;

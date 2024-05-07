@@ -17,7 +17,8 @@
 
 #include <algorithm>
 
-template<class T> void addISetting(const TiXmlNode *node, const T &item, std::vector<T> &items)
+template<class T>
+void addISetting(const TiXmlNode* node, const T& item, std::vector<T>& items, bool toBegin = false)
 {
   if (node != nullptr)
   {
@@ -50,7 +51,10 @@ template<class T> void addISetting(const TiXmlNode *node, const T &item, std::ve
     }
   }
 
-  items.push_back(item);
+  if (!toBegin)
+    items.emplace_back(item);
+  else
+    items.insert(items.begin(), item);
 }
 
 Logger CSettingGroup::s_logger;
@@ -161,6 +165,13 @@ SettingList CSettingGroup::GetSettings(SettingLevel level) const
   return settings;
 }
 
+bool CSettingGroup::ContainsVisibleSettings(const SettingLevel level) const
+{
+  return std::any_of(m_settings.begin(), m_settings.end(), [&level](const SettingPtr& setting) {
+    return setting->GetLevel() <= level && setting->MeetsRequirements() && setting->IsVisible();
+  });
+}
+
 void CSettingGroup::AddSetting(const SettingPtr& setting)
 {
   addISetting(nullptr, setting, m_settings);
@@ -252,7 +263,7 @@ SettingGroupList CSettingCategory::GetGroups(SettingLevel level) const
   SettingGroupList groups;
   for (const auto& group : m_groups)
   {
-    if (group->MeetsRequirements() && group->IsVisible() && group->GetSettings(level).size() > 0)
+    if (group->MeetsRequirements() && group->IsVisible() && group->ContainsVisibleSettings(level))
       groups.push_back(group);
   }
 
@@ -266,7 +277,12 @@ bool CSettingCategory::CanAccess() const
 
 void CSettingCategory::AddGroup(const SettingGroupPtr& group)
 {
-  addISetting(nullptr, group, m_groups);
+  addISetting(nullptr, group, m_groups, false);
+}
+
+void CSettingCategory::AddGroupToFront(const SettingGroupPtr& group)
+{
+  addISetting(nullptr, group, m_groups, true);
 }
 
 void CSettingCategory::AddGroups(const SettingGroupList &groups)

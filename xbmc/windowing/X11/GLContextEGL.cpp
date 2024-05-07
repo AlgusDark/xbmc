@@ -22,22 +22,21 @@
 #include <mutex>
 
 #include <EGL/eglext.h>
+#include <unistd.h>
 
+#include "PlatformDefs.h"
 #include "system_gl.h"
 
 #define EGL_NO_CONFIG (EGLConfig)0
 
-CGLContextEGL::CGLContextEGL(Display *dpy, EGLint renderingApi) : CGLContext(dpy)
+CGLContextEGL::CGLContextEGL(Display* dpy, EGLint renderingApi)
+  : CGLContext(dpy),
+    m_renderingApi(renderingApi),
+    m_eglConfig(EGL_NO_CONFIG),
+    m_eglGetPlatformDisplayEXT(
+        (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT"))
 {
   m_extPrefix = "EGL_";
-  m_renderingApi = renderingApi;
-
-  m_eglDisplay = EGL_NO_DISPLAY;
-  m_eglSurface = EGL_NO_SURFACE;
-  m_eglContext = EGL_NO_CONTEXT;
-  m_eglConfig = EGL_NO_CONFIG;
-
-  m_eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
 
   const auto settings = CServiceBroker::GetSettingsComponent();
   if (settings)
@@ -342,7 +341,7 @@ bool CGLContextEGL::SuitableCheck(EGLDisplay eglDisplay, EGLConfig config)
     return false;
   if (!eglGetConfigAttrib(eglDisplay, config, EGL_BLUE_SIZE, &value) || value < 8)
     return false;
-  if (!eglGetConfigAttrib(eglDisplay, config, EGL_DEPTH_SIZE, &value) || value < 24)
+  if (!eglGetConfigAttrib(eglDisplay, config, EGL_DEPTH_SIZE, &value) || value < 16)
     return false;
 
   return true;

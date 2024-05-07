@@ -8,13 +8,13 @@
 
 #include "GUIDialog.h"
 
-#include "Application.h"
 #include "GUIComponent.h"
 #include "GUIControlFactory.h"
 #include "GUILabelControl.h"
 #include "GUIWindowManager.h"
 #include "ServiceBroker.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "messaging/ApplicationMessenger.h"
 #include "threads/SingleLock.h"
 #include "utils/TimeUtils.h"
@@ -115,7 +115,7 @@ void CGUIDialog::DoProcess(unsigned int currentTime, CDirtyRegionList &dirtyregi
 
   // if we were running but now we're not, mark us dirty
   if (!m_active && m_wasRunning)
-    dirtyregions.push_back(CDirtyRegion(m_renderRegion));
+    dirtyregions.emplace_back(m_renderRegion);
 
   if (m_active)
     CGUIWindow::DoProcess(currentTime, dirtyregions);
@@ -191,7 +191,7 @@ void CGUIDialog::Open(const std::string &param /* = "" */)
 
 void CGUIDialog::Open(bool bProcessRenderLoop, const std::string& param /* = "" */)
 {
-  if (!g_application.IsCurrentThread())
+  if (!CServiceBroker::GetAppMessenger()->IsProcessThread())
   {
     // make sure graphics lock is not held
     CSingleExit leaveIt(CServiceBroker::GetWinSystem()->GetGfxContext());

@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include "XBDateTime.h"
 #include "addons/kodi-dev-kit/include/kodi/c-api/addon-instance/pvr/pvr_epg.h"
 #include "pvr/settings/PVRSettings.h"
 #include "threads/CriticalSection.h"
@@ -23,6 +22,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+class CDateTime;
 
 namespace PVR
 {
@@ -143,7 +144,8 @@ namespace PVR
      * @param iBroadcastId The event id to lookup.
      * @return The requested event, or an empty tag when not found
      */
-    std::shared_ptr<CPVREpgInfoTag> GetTagById(const std::shared_ptr<CPVREpg>& epg, unsigned int iBroadcastId) const;
+    std::shared_ptr<CPVREpgInfoTag> GetTagById(const std::shared_ptr<const CPVREpg>& epg,
+                                               unsigned int iBroadcastId) const;
 
     /*!
      * @brief Get the EPG event with the given database id
@@ -320,7 +322,7 @@ namespace PVR
      * @param database The database containing the epg data.
      * @return True on success, false otherwise.
      */
-    bool QueueDeleteEpg(const std::shared_ptr<CPVREpg>& epg,
+    bool QueueDeleteEpg(const std::shared_ptr<const CPVREpg>& epg,
                         const std::shared_ptr<CPVREpgDatabase>& database);
 
     std::shared_ptr<CPVREpgDatabase> m_database; /*!< the EPG database */

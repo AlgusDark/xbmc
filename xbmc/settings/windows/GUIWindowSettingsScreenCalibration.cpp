@@ -8,15 +8,17 @@
 
 #include "GUIWindowSettingsScreenCalibration.h"
 
-#include "Application.h"
 #include "ServiceBroker.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "dialogs/GUIDialogYesNo.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIMoverControl.h"
 #include "guilib/GUIResizeControl.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "settings/DisplaySettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
@@ -195,10 +197,14 @@ bool CGUIWindowSettingsScreenCalibration::OnMessage(CGUIMessage& message)
 
       // Get the allowable resolutions that we can calibrate...
       m_Res.clear();
-      if (g_application.GetAppPlayer().IsPlayingVideo())
+
+      auto& components = CServiceBroker::GetAppComponents();
+      const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+      bool isPlayingVideo{appPlayer->IsPlayingVideo()};
+      if (isPlayingVideo)
       { // don't allow resolution switching if we are playing a video
 
-        g_application.GetAppPlayer().TriggerUpdateResolution();
+        appPlayer->TriggerUpdateResolution();
 
         m_iCurRes = 0;
         m_Res.push_back(CServiceBroker::GetWinSystem()->GetGfxContext().GetVideoResolution());
@@ -214,6 +220,12 @@ bool CGUIWindowSettingsScreenCalibration::OnMessage(CGUIMessage& message)
 
       // Setup the first control
       m_iControl = CONTROL_TOP_LEFT;
+
+      m_isSubtitleBarEnabled =
+          !(CServiceBroker::GetSettingsComponent()->GetSubtitlesSettings()->GetAlignment() !=
+                SUBTITLES::Align::MANUAL &&
+            isPlayingVideo);
+
       ResetControls();
       return true;
     }
@@ -312,21 +324,22 @@ void CGUIWindowSettingsScreenCalibration::ResetControls()
   // disable the UI calibration for our controls
   // and set their limits
   // also, set them to invisible if they don't have focus
-  CGUIMoverControl* pControl = dynamic_cast<CGUIMoverControl*>(GetControl(CONTROL_TOP_LEFT));
   RESOLUTION_INFO info =
       CServiceBroker::GetWinSystem()->GetGfxContext().GetResInfo(m_Res[m_iCurRes]);
 
-  m_subtitleVerticalMargin =
-      info.iHeight / 100 * SUBTITLES::CSubtitlesSettings::GetInstance().GetVerticalMarginPerc();
+  m_subtitleVerticalMargin = static_cast<int>(
+      static_cast<float>(info.iHeight) / 100 *
+      CServiceBroker::GetSettingsComponent()->GetSubtitlesSettings()->GetVerticalMarginPerc());
 
+  CGUIMoverControl* pControl = dynamic_cast<CGUIMoverControl*>(GetControl(CONTROL_TOP_LEFT));
   if (pControl)
   {
     pControl->SetLimits(-info.iWidth / 4, -info.iHeight / 4, info.iWidth / 4, info.iHeight / 4);
     auto& size = m_controlsSize[CONTROL_TOP_LEFT];
     pControl->SetHeight(size.first / DEFAULT_GUI_HEIGHT * info.iHeight);
     pControl->SetWidth(size.second / DEFAULT_GUI_WIDTH * info.iWidth);
-    pControl->SetPosition(static_cast<float>(info.Overscan.left),
-                          static_cast<float>(info.Overscan.top));
+    pControl->SetPosition(static_cast<float>(info.Overscan.left) + info.guiInsets.left,
+                          static_cast<float>(info.Overscan.top) + info.guiInsets.top);
     pControl->SetLocation(info.Overscan.left, info.Overscan.top, false);
   }
   pControl = dynamic_cast<CGUIMoverControl*>(GetControl(CONTROL_BOTTOM_RIGHT));
@@ -337,8 +350,9 @@ void CGUIWindowSettingsScreenCalibration::ResetControls()
     auto& size = m_controlsSize[CONTROL_BOTTOM_RIGHT];
     pControl->SetHeight(size.first / DEFAULT_GUI_HEIGHT * info.iHeight);
     pControl->SetWidth(size.second / DEFAULT_GUI_WIDTH * info.iWidth);
-    pControl->SetPosition(static_cast<float>(info.Overscan.right) - pControl->GetWidth(),
-                          static_cast<float>(info.Overscan.bottom) - pControl->GetHeight());
+    pControl->SetPosition(
+        static_cast<float>(info.Overscan.right) - info.guiInsets.right - pControl->GetWidth(),
+        static_cast<float>(info.Overscan.bottom) - info.guiInsets.bottom - pControl->GetHeight());
     pControl->SetLocation(info.Overscan.right, info.Overscan.bottom, false);
   }
   // Subtitles and OSD controls can only move up and down
@@ -351,14 +365,16 @@ void CGUIWindowSettingsScreenCalibration::ResetControls()
         static_cast<float>(CONTROL_SUBTITLES_SPACE) / DEFAULT_GUI_HEIGHT * info.iHeight;
     m_subtitlesHalfSpace = static_cast<int>(scaledSpace / 2);
     int barHeight = static_cast<int>(scaledHeight - scaledSpace);
-    pControl->SetLimits(0, m_subtitlesHalfSpace + barHeight + info.Overscan.top, 0,
-                        info.Overscan.bottom + m_subtitlesHalfSpace);
+    pControl->SetLimits(0,
+                        m_subtitlesHalfSpace + barHeight + info.Overscan.top + info.guiInsets.top,
+                        0, info.Overscan.bottom + m_subtitlesHalfSpace - info.guiInsets.bottom);
     pControl->SetHeight(scaledHeight);
     pControl->SetWidth(size.second / DEFAULT_GUI_WIDTH * info.iWidth);
     // If the vertical margin has been changed from the previous calibration,
     // the text bar could appear offscreen, then force move to visible area
-    if (info.iSubtitles - m_subtitleVerticalMargin > info.iHeight)
-      info.iSubtitles = info.Overscan.bottom;
+    if (info.iSubtitles - m_subtitleVerticalMargin >
+        info.iHeight + info.guiInsets.top - info.guiInsets.bottom)
+      info.iSubtitles = info.Overscan.bottom - info.guiInsets.bottom;
     // We want the text to be at the base of the bar,
     // then we shift the position to include the vertical margin
     pControl->SetPosition((info.iWidth - pControl->GetWidth()) * 0.5f,
@@ -366,6 +382,7 @@ void CGUIWindowSettingsScreenCalibration::ResetControls()
                               m_subtitleVerticalMargin);
     pControl->SetLocation(0, info.iSubtitles + m_subtitlesHalfSpace - m_subtitleVerticalMargin,
                           false);
+    pControl->SetEnabled(m_isSubtitleBarEnabled);
   }
   // The pixel ratio control
   CGUIResizeControl* pResize = dynamic_cast<CGUIResizeControl*>(GetControl(CONTROL_PIXEL_RATIO));
@@ -385,8 +402,9 @@ void CGUIWindowSettingsScreenCalibration::ResetControls()
     auto& size = m_controlsSize[CONTROL_RESET];
     pControl->SetHeight(size.first / DEFAULT_GUI_HEIGHT * info.iHeight);
     pControl->SetWidth(size.second / DEFAULT_GUI_WIDTH * info.iWidth);
-    float posX = 0;
-    float posY = info.iHeight - pControl->GetHeight();
+    float posX = 0 + info.guiInsets.right;
+    float posY =
+        static_cast<float>(info.Overscan.bottom) - info.guiInsets.bottom - pControl->GetHeight();
     pControl->SetLimits(posX, posY, posX, posY);
     pControl->SetPosition(posX, posY);
     pControl->SetLocation(posX, posY, false);
@@ -440,8 +458,8 @@ bool CGUIWindowSettingsScreenCalibration::UpdateFromControl(int iControl)
           CGUIMoverControl* pControl = dynamic_cast<CGUIMoverControl*>(GetControl(CONTROL_RESET));
           if (pControl)
           {
-            float posX = info.Overscan.left;
-            float posY = info.Overscan.bottom - pControl->GetHeight();
+            float posX = info.Overscan.left + info.guiInsets.left;
+            float posY = info.Overscan.bottom - pControl->GetHeight() - info.guiInsets.bottom;
             pControl->SetLimits(posX, posY, posX, posY);
             pControl->SetPosition(posX, posY);
             pControl->SetLocation(posX, posY, false);
@@ -463,8 +481,8 @@ bool CGUIWindowSettingsScreenCalibration::UpdateFromControl(int iControl)
           pControl = dynamic_cast<CGUIMoverControl*>(GetControl(CONTROL_RESET));
           if (pControl)
           {
-            float posX = info.Overscan.left;
-            float posY = info.Overscan.bottom - pControl->GetHeight();
+            float posX = info.Overscan.left + info.guiInsets.left;
+            float posY = info.Overscan.bottom - pControl->GetHeight() - info.guiInsets.bottom;
             pControl->SetLimits(posX, posY, posX, posY);
             pControl->SetPosition(posX, posY);
             pControl->SetLocation(posX, posY, false);
@@ -474,12 +492,21 @@ bool CGUIWindowSettingsScreenCalibration::UpdateFromControl(int iControl)
 
         case CONTROL_SUBTITLES:
         {
-          info.iSubtitles =
-              pControl->GetYLocation() - m_subtitlesHalfSpace + m_subtitleVerticalMargin;
-          labelDescription = StringUtils::Format("[B]{}[/B][CR]{}", g_localizeStrings.Get(277),
-                                                 g_localizeStrings.Get(278));
-          labelValue = StringUtils::Format(g_localizeStrings.Get(39184), info.iSubtitles,
-                                           info.iSubtitles - m_subtitleVerticalMargin);
+          if (m_isSubtitleBarEnabled)
+          {
+            info.iSubtitles =
+                pControl->GetYLocation() - m_subtitlesHalfSpace + m_subtitleVerticalMargin;
+
+            labelDescription = StringUtils::Format("[B]{}[/B][CR]{}", g_localizeStrings.Get(277),
+                                                   g_localizeStrings.Get(278));
+            labelValue = StringUtils::Format(g_localizeStrings.Get(39184), info.iSubtitles,
+                                             info.iSubtitles - m_subtitleVerticalMargin);
+          }
+          else
+          {
+            labelDescription = StringUtils::Format("[B]{}[/B][CR]{}", g_localizeStrings.Get(277),
+                                                   g_localizeStrings.Get(39189));
+          }
         }
         break;
 
@@ -522,7 +549,7 @@ bool CGUIWindowSettingsScreenCalibration::UpdateFromControl(int iControl)
       // Keep the subtitle bar within the overscan boundary
       if (info.Overscan.bottom + m_subtitleVerticalMargin < info.iSubtitles)
       {
-        info.iSubtitles = info.Overscan.bottom + m_subtitleVerticalMargin;
+        info.iSubtitles = info.Overscan.bottom - info.guiInsets.bottom + m_subtitleVerticalMargin;
 
         // We want the text to be at the base of the bar,
         // then we shift the position to include the vertical margin
@@ -542,8 +569,9 @@ bool CGUIWindowSettingsScreenCalibration::UpdateFromControl(int iControl)
       m_subtitlesHalfSpace = static_cast<int>(scaledSpace / 2);
       const int barHeight = static_cast<int>(scaledHeight - scaledSpace);
 
-      pControl->SetLimits(0, m_subtitlesHalfSpace + barHeight + info.Overscan.top, 0,
-                          info.Overscan.bottom + m_subtitlesHalfSpace);
+      pControl->SetLimits(0,
+                          m_subtitlesHalfSpace + barHeight + info.Overscan.top + info.guiInsets.top,
+                          0, info.Overscan.bottom + m_subtitlesHalfSpace);
     }
   }
 

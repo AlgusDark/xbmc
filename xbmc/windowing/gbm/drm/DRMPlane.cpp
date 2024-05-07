@@ -10,7 +10,10 @@
 
 #include "DRMUtils.h"
 #include "utils/DRMHelpers.h"
+#include "utils/StringUtils.h"
 #include "utils/log.h"
+
+#include <algorithm>
 
 using namespace KODI::WINDOWING::GBM;
 

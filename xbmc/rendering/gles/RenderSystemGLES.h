@@ -11,6 +11,7 @@
 #include "GLESShader.h"
 #include "rendering/RenderSystem.h"
 #include "utils/ColorUtils.h"
+#include "utils/Map.h"
 
 #include <map>
 
@@ -24,6 +25,7 @@ enum class ShaderMethodGLES
   SM_TEXTURE,
   SM_MULTI,
   SM_FONTS,
+  SM_FONTS_SHADER_CLIP,
   SM_TEXTURE_NOBLEND,
   SM_MULTI_BLENDCOLOR,
   SM_TEXTURE_RGBA,
@@ -31,66 +33,43 @@ enum class ShaderMethodGLES
   SM_TEXTURE_RGBA_BLENDCOLOR,
   SM_TEXTURE_RGBA_BOB,
   SM_TEXTURE_RGBA_BOB_OES,
-  SM_TEXTURE_NOALPHA
+  SM_TEXTURE_NOALPHA,
+  SM_MAX
 };
 
 template<>
 struct fmt::formatter<ShaderMethodGLES> : fmt::formatter<std::string_view>
 {
-
-public:
-  static constexpr auto toString(ShaderMethodGLES method)
-  {
-    switch (method)
-    {
-      case ShaderMethodGLES::SM_DEFAULT:
-        return "default";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE:
-        return "texture";
-        break;
-      case ShaderMethodGLES::SM_MULTI:
-        return "multi";
-        break;
-      case ShaderMethodGLES::SM_FONTS:
-        return "fonts";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_NOBLEND:
-        return "texture no blending";
-        break;
-      case ShaderMethodGLES::SM_MULTI_BLENDCOLOR:
-        return "multi blend colour";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_RGBA:
-        return "texure rgba";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_RGBA_OES:
-        return "texure rgba OES";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_RGBA_BLENDCOLOR:
-        return "texture rgba blend colour";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_RGBA_BOB:
-        return "texure rgba bob";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_RGBA_BOB_OES:
-        return "texure rgba bob OES";
-        break;
-      case ShaderMethodGLES::SM_TEXTURE_NOALPHA:
-        return "texture no alpha";
-        break;
-      default:
-        return "unknown";
-        break;
-    }
-  }
-
   template<typename FormatContext>
   constexpr auto format(const ShaderMethodGLES& shaderMethod, FormatContext& ctx)
   {
-    auto shaderName = toString(shaderMethod);
-    return fmt::formatter<std::string_view>::format(shaderName, ctx);
+    const auto it = ShaderMethodGLESMap.find(shaderMethod);
+    if (it == ShaderMethodGLESMap.cend())
+      throw std::range_error("no string mapping found for shader method");
+
+    return fmt::formatter<string_view>::format(it->second, ctx);
   }
+
+private:
+  static constexpr auto ShaderMethodGLESMap = make_map<ShaderMethodGLES, std::string_view>({
+      {ShaderMethodGLES::SM_DEFAULT, "default"},
+      {ShaderMethodGLES::SM_TEXTURE, "texture"},
+      {ShaderMethodGLES::SM_MULTI, "multi"},
+      {ShaderMethodGLES::SM_FONTS, "fonts"},
+      {ShaderMethodGLES::SM_FONTS_SHADER_CLIP, "fonts with vertex shader based clipping"},
+      {ShaderMethodGLES::SM_TEXTURE_NOBLEND, "texture no blending"},
+      {ShaderMethodGLES::SM_MULTI_BLENDCOLOR, "multi blend colour"},
+      {ShaderMethodGLES::SM_TEXTURE_RGBA, "texure rgba"},
+      {ShaderMethodGLES::SM_TEXTURE_RGBA_OES, "texture rgba OES"},
+      {ShaderMethodGLES::SM_TEXTURE_RGBA_BLENDCOLOR, "texture rgba blend colour"},
+      {ShaderMethodGLES::SM_TEXTURE_RGBA_BOB, "texture rgba bob"},
+      {ShaderMethodGLES::SM_TEXTURE_RGBA_BOB_OES, "texture rgba bob OES"},
+      {ShaderMethodGLES::SM_TEXTURE_NOALPHA, "texture no alpha"},
+  });
+
+  static_assert(static_cast<size_t>(ShaderMethodGLES::SM_MAX) == ShaderMethodGLESMap.size(),
+                "ShaderMethodGLESMap doesn't match the size of ShaderMethodGLES, did you forget to "
+                "add/remove a mapping?");
 };
 
 class CRenderSystemGLES : public CRenderSystemBase
@@ -106,6 +85,7 @@ public:
   bool BeginRender() override;
   bool EndRender() override;
   void PresentRender(bool rendered, bool videoLayer) override;
+  void InvalidateColorBuffer() override;
   bool ClearBuffers(UTILS::COLOR::Color color) override;
   bool IsExtSupported(const char* extension) const override;
 
@@ -119,6 +99,8 @@ public:
   CRect ClipRectToScissorRect(const CRect &rect) override;
   void SetScissors(const CRect& rect) override;
   void ResetScissors() override;
+
+  void SetDepthCulling(DEPTH_CULLING culling) override;
 
   void CaptureStateBlock() override;
   void ApplyStateBlock() override;
@@ -147,6 +129,10 @@ public:
   GLint GUIShaderGetContrast();
   GLint GUIShaderGetBrightness();
   GLint GUIShaderGetModel();
+  GLint GUIShaderGetMatrix();
+  GLint GUIShaderGetClip();
+  GLint GUIShaderGetCoordStep();
+  GLint GUIShaderGetDepth();
 
 protected:
   virtual void SetVSyncImpl(bool enable) = 0;

@@ -9,6 +9,7 @@
 #include "DialogGameStretchMode.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "cores/RetroPlayer/RetroPlayerUtils.h"
 #include "cores/RetroPlayer/guibridge/GUIGameVideoHandle.h"
 #include "guilib/LocalizeStrings.h"
@@ -119,4 +120,10 @@ unsigned int CDialogGameStretchMode::GetFocusedItem() const
 void CDialogGameStretchMode::PostExit()
 {
   m_stretchModes.clear();
+}
+
+bool CDialogGameStretchMode::OnClickAction()
+{
+  Close();
+  return true;
 }

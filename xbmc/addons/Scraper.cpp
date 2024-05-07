@@ -8,11 +8,14 @@
 
 #include "Scraper.h"
 
-#include "AddonManager.h"
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "URL.h"
 #include "Util.h"
+#include "addons/AddonManager.h"
+#include "addons/addoninfo/AddonInfo.h"
+#include "addons/addoninfo/AddonType.h"
 #include "addons/settings/AddonSettings.h"
 #include "filesystem/CurlFile.h"
 #include "filesystem/Directory.h"
@@ -28,6 +31,7 @@
 #include "settings/SettingsComponent.h"
 #include "settings/SettingsValueFlatJsonSerializer.h"
 #include "utils/CharsetConverter.h"
+#include "utils/JSONVariantWriter.h"
 #include "utils/ScraperParser.h"
 #include "utils/ScraperUrl.h"
 #include "utils/StringUtils.h"
@@ -42,8 +46,8 @@
 #include <fstrcmp.h>
 
 using namespace XFILE;
+using namespace KODI;
 using namespace MUSIC_GRABBER;
-using namespace VIDEO;
 
 namespace ADDON
 {
@@ -88,22 +92,22 @@ CONTENT_TYPE TranslateContent(const std::string &string)
   return CONTENT_NONE;
 }
 
-TYPE ScraperTypeFromContent(const CONTENT_TYPE &content)
+AddonType ScraperTypeFromContent(const CONTENT_TYPE& content)
 {
   switch (content)
   {
   case CONTENT_ALBUMS:
-    return ADDON_SCRAPER_ALBUMS;
+    return AddonType::SCRAPER_ALBUMS;
   case CONTENT_ARTISTS:
-    return ADDON_SCRAPER_ARTISTS;
+    return AddonType::SCRAPER_ARTISTS;
   case CONTENT_MOVIES:
-    return ADDON_SCRAPER_MOVIES;
+    return AddonType::SCRAPER_MOVIES;
   case CONTENT_MUSICVIDEOS:
-    return ADDON_SCRAPER_MUSICVIDEOS;
+    return AddonType::SCRAPER_MUSICVIDEOS;
   case CONTENT_TVSHOWS:
-    return ADDON_SCRAPER_TVSHOWS;
+    return AddonType::SCRAPER_TVSHOWS;
   default:
-    return ADDON_UNKNOWN;
+    return AddonType::UNKNOWN;
   }
 }
 
@@ -119,11 +123,8 @@ static void CheckScraperError(const TiXmlElement *pxeRoot)
   throw CScraperError(sTitle, sMessage);
 }
 
-CScraper::CScraper(const AddonInfoPtr& addonInfo, TYPE addonType)
-    : CAddon(addonInfo, addonType)
-    , m_fLoaded(false)
-    , m_requiressettings(false)
-    , m_pathContent(CONTENT_NONE)
+CScraper::CScraper(const AddonInfoPtr& addonInfo, AddonType addonType)
+  : CAddon(addonInfo, addonType)
 {
   m_requiressettings = addonInfo->Type(addonType)->GetValue("@requiressettings").asBoolean();
 
@@ -134,23 +135,23 @@ CScraper::CScraper(const AddonInfoPtr& addonInfo, TYPE addonType)
 
   switch (addonType)
   {
-  case ADDON_SCRAPER_ALBUMS:
-    m_pathContent = CONTENT_ALBUMS;
-    break;
-  case ADDON_SCRAPER_ARTISTS:
-    m_pathContent = CONTENT_ARTISTS;
-    break;
-  case ADDON_SCRAPER_MOVIES:
-    m_pathContent = CONTENT_MOVIES;
-    break;
-  case ADDON_SCRAPER_MUSICVIDEOS:
-    m_pathContent = CONTENT_MUSICVIDEOS;
-    break;
-  case ADDON_SCRAPER_TVSHOWS:
-    m_pathContent = CONTENT_TVSHOWS;
-    break;
-  default:
-    break;
+    case AddonType::SCRAPER_ALBUMS:
+      m_pathContent = CONTENT_ALBUMS;
+      break;
+    case AddonType::SCRAPER_ARTISTS:
+      m_pathContent = CONTENT_ARTISTS;
+      break;
+    case AddonType::SCRAPER_MOVIES:
+      m_pathContent = CONTENT_MOVIES;
+      break;
+    case AddonType::SCRAPER_MUSICVIDEOS:
+      m_pathContent = CONTENT_MUSICVIDEOS;
+      break;
+    case AddonType::SCRAPER_TVSHOWS:
+      m_pathContent = CONTENT_TVSHOWS;
+      break;
+    default:
+      break;
   }
 
   m_isPython = URIUtils::GetExtension(addonInfo->Type(addonType)->LibPath()) == ".py";
@@ -172,12 +173,12 @@ bool CScraper::SetPathSettings(CONTENT_TYPE content, const std::string &xml)
 
   CXBMCTinyXML doc;
   doc.Parse(xml);
-  return SettingsFromXML(doc);
+  return SettingsFromXML(doc, false);
 }
 
 std::string CScraper::GetPathSettings()
 {
-  if (!LoadSettings(false))
+  if (!LoadSettings(false, true))
     return "";
 
   std::stringstream stream;
@@ -333,7 +334,7 @@ std::string CScraper::GetPathSettingsAsJSON()
 {
   static const std::string EmptyPathSettings = "{}";
 
-  if (!LoadSettings(false))
+  if (!LoadSettings(false, true))
     return EmptyPathSettings;
 
   CSettingsValueFlatJsonSerializer jsonSerializer;
@@ -368,11 +369,10 @@ bool CScraper::Load()
 
       bool bOptional = itr->optional;
 
-      if (CServiceBroker::GetAddonMgr().GetAddon((*itr).id, dep, ADDON::ADDON_UNKNOWN,
-                                                 ADDON::OnlyEnabled::CHOICE_YES))
+      if (CServiceBroker::GetAddonMgr().GetAddon((*itr).id, dep, ADDON::OnlyEnabled::CHOICE_YES))
       {
         CXBMCTinyXML doc;
-        if (dep->Type() == ADDON_SCRAPER_LIBRARY && doc.LoadFile(dep->LibPath()))
+        if (dep->Type() == AddonType::SCRAPER_LIBRARY && doc.LoadFile(dep->LibPath()))
           m_parser.AddDocument(&doc);
       }
       else
@@ -476,8 +476,8 @@ CScraperUrl CScraper::NfoUrl(const std::string &sNfoContent)
        with start and end-tags we're not able to use it.
        Check for the desired Elements instead.
       */
-      TiXmlElement *pxeUrl = NULL;
-      TiXmlElement *pId = NULL;
+      TiXmlElement* pxeUrl = nullptr;
+      TiXmlElement* pId = nullptr;
       if (!strcmp(doc.RootElement()->Value(), "details"))
       {
         pxeUrl = doc.RootElement()->FirstChildElement("url");
@@ -552,8 +552,8 @@ CScraperUrl CScraper::ResolveIDToUrl(const std::string &externalID)
        with start and end-tags we're not able to use it.
        Check for the desired Elements instead.
        */
-      TiXmlElement *pxeUrl = NULL;
-      TiXmlElement *pId = NULL;
+      TiXmlElement* pxeUrl = nullptr;
+      TiXmlElement* pId = nullptr;
       if (!strcmp(doc.RootElement()->Value(), "details"))
       {
         pxeUrl = doc.RootElement()->FirstChildElement("url");
@@ -733,10 +733,10 @@ static std::string ParseFanart(const CFileItem &item, int nFanart, const std::st
 }
 
 template<class T>
-static void DetailsFromFileItem(const CFileItem &, T &);
+static bool DetailsFromFileItem(const CFileItem&, T&);
 
 template<>
-void DetailsFromFileItem<CAlbum>(const CFileItem &item, CAlbum &album)
+bool DetailsFromFileItem<CAlbum>(const CFileItem& item, CAlbum& album)
 {
   album.strAlbum = item.GetLabel();
   album.strMusicBrainzAlbumID = FromString(item, "album.musicbrainzid");
@@ -779,10 +779,11 @@ void DetailsFromFileItem<CAlbum>(const CFileItem &item, CAlbum &album)
 
   int nThumbs = item.GetProperty("album.thumbs").asInteger32();
   ParseThumbs(album.thumbURL, item, nThumbs, "album.thumb");
+  return true;
 }
 
 template<>
-void DetailsFromFileItem<CArtist>(const CFileItem &item, CArtist &artist)
+bool DetailsFromFileItem<CArtist>(const CFileItem& item, CArtist& artist)
 {
   artist.strArtist = item.GetLabel();
   artist.strMusicBrainzArtistID = FromString(item, "artist.musicbrainzid");
@@ -818,6 +819,23 @@ void DetailsFromFileItem<CArtist>(const CFileItem &item, CArtist &artist)
     artist.discography.emplace_back(discoAlbum);
   }
 
+  const int numvideolinks = item.GetProperty("artist.videolinks").asInteger32();
+  if (numvideolinks > 0)
+  {
+    artist.videolinks.reserve(numvideolinks);
+    for (int i = 1; i <= numvideolinks; ++i)
+    {
+      std::stringstream prefix;
+      prefix << "artist.videolink" << i;
+      ArtistVideoLinks videoLink;
+      videoLink.title = FromString(item, prefix.str() + ".title");
+      videoLink.mbTrackID = FromString(item, prefix.str() + ".mbtrackid");
+      videoLink.videoURL = FromString(item, prefix.str() + ".url");
+      videoLink.thumbURL = FromString(item, prefix.str() + ".thumb");
+      artist.videolinks.emplace_back(std::move(videoLink));
+    }
+  }
+
   int nThumbs = item.GetProperty("artist.thumbs").asInteger32();
   ParseThumbs(artist.thumbURL, item, nThumbs, "artist.thumb");
 
@@ -831,34 +849,58 @@ void DetailsFromFileItem<CArtist>(const CFileItem &item, CArtist &artist)
     for (unsigned int i = 0; i < fanart.GetNumFanarts(); i++)
       artist.thumbURL.AddParsedUrl(fanart.GetImageURL(i), "fanart", fanart.GetPreviewURL(i));
   }
+  return true;
 }
 
 template<>
-void DetailsFromFileItem<CVideoInfoTag>(const CFileItem &item, CVideoInfoTag &tag)
+bool DetailsFromFileItem<CVideoInfoTag>(const CFileItem& item, CVideoInfoTag& tag)
 {
   if (item.HasVideoInfoTag())
+  {
     tag = *item.GetVideoInfoTag();
+    return true;
+  }
+  return false;
 }
 
 template<class T>
-static bool PythonDetails(const std::string &ID,
-                          const std::string &key,
-                          const std::string &url,
-                          const std::string &action,
-                          const std::string &pathSettings,
-                          T &result)
+static bool PythonDetails(const std::string& ID,
+                          const std::string& key,
+                          const std::string& url,
+                          const std::string& action,
+                          const std::string& pathSettings,
+                          const std::unordered_map<std::string, std::string>& uniqueIDs,
+                          T& result)
 {
+  CVariant ids;
+  for (const auto& [identifierType, identifier] : uniqueIDs)
+    ids[identifierType] = identifier;
+  std::string uids;
+  CJSONVariantWriter::Write(ids, uids, true);
   std::stringstream str;
   str << "plugin://" << ID << "?action=" << action << "&" << key << "=" << CURL::Encode(url);
   str << "&pathSettings=" << CURL::Encode(pathSettings);
+  if (!uniqueIDs.empty())
+    str << "&uniqueIDs=" << CURL::Encode(uids);
 
   CFileItem item(url, false);
 
   if (!XFILE::CPluginDirectory::GetPluginResult(str.str(), item, false))
     return false;
 
-  DetailsFromFileItem(item, result);
-  return true;
+  return DetailsFromFileItem(item, result);
+}
+
+template<class T>
+static bool PythonDetails(const std::string& ID,
+                          const std::string& key,
+                          const std::string& url,
+                          const std::string& action,
+                          const std::string& pathSettings,
+                          T& result)
+{
+  const std::unordered_map<std::string, std::string> ids;
+  return PythonDetails(ID, key, url, action, pathSettings, ids, result);
 }
 
 // fetch list of matching movies sorted by relevance (may be empty);
@@ -948,7 +990,7 @@ std::vector<CScraperUrl> CScraper::FindMovie(XFILE::CCurlFile &fcurl,
     if (fSort)
     {
       const char *sorted = xhResults.Element()->Attribute("sorted");
-      if (sorted != NULL)
+      if (sorted != nullptr)
         fSort = !StringUtils::EqualsNoCase(sorted, "yes");
     }
 
@@ -1209,9 +1251,9 @@ std::vector<CMusicArtistInfo> CScraper::FindArtist(CCurlFile &fcurl, const std::
 }
 
 // fetch list of episodes from URL (from video database)
-EPISODELIST CScraper::GetEpisodeList(XFILE::CCurlFile &fcurl, const CScraperUrl &scurl)
+VIDEO::EPISODELIST CScraper::GetEpisodeList(XFILE::CCurlFile& fcurl, const CScraperUrl& scurl)
 {
-  EPISODELIST vcep;
+  VIDEO::EPISODELIST vcep;
   if (!scurl.HasUrls())
     return vcep;
 
@@ -1234,7 +1276,7 @@ EPISODELIST CScraper::GetEpisodeList(XFILE::CCurlFile &fcurl, const CScraperUrl 
 
     for (int i = 0; i < items.Size(); ++i)
     {
-      EPISODE ep;
+      VIDEO::EPISODE ep;
       const auto& tag = *items[i]->GetVideoInfoTag();
       ep.strTitle = tag.m_strTitle;
       ep.iSeason = tag.m_iSeason;
@@ -1270,7 +1312,7 @@ EPISODELIST CScraper::GetEpisodeList(XFILE::CCurlFile &fcurl, const CScraperUrl 
     for (TiXmlElement *pxeMovie = xhDoc.FirstChild("episodeguide").FirstChild("episode").Element();
          pxeMovie; pxeMovie = pxeMovie->NextSiblingElement())
     {
-      EPISODE ep;
+      VIDEO::EPISODE ep;
       TiXmlElement *pxeLink = pxeMovie->FirstChildElement("url");
       std::string strEpNum;
       if (pxeLink && XMLUtils::GetInt(pxeMovie, "season", ep.iSeason) &&
@@ -1309,10 +1351,11 @@ EPISODELIST CScraper::GetEpisodeList(XFILE::CCurlFile &fcurl, const CScraperUrl 
 }
 
 // takes URL; returns true and populates video details on success, false otherwise
-bool CScraper::GetVideoDetails(XFILE::CCurlFile &fcurl,
-                               const CScraperUrl &scurl,
+bool CScraper::GetVideoDetails(XFILE::CCurlFile& fcurl,
+                               const std::unordered_map<std::string, std::string>& uniqueIDs,
+                               const CScraperUrl& scurl,
                                bool fMovie /*else episode*/,
-                               CVideoInfoTag &video)
+                               CVideoInfoTag& video)
 {
   CLog::Log(LOGDEBUG,
             "{}: Reading {} '{}' using {} scraper "
@@ -1324,7 +1367,8 @@ bool CScraper::GetVideoDetails(XFILE::CCurlFile &fcurl,
 
   if (m_isPython)
     return PythonDetails(ID(), "url", scurl.GetFirstThumbUrl(),
-      fMovie ? "getdetails" : "getepisodedetails", GetPathSettingsAsJSON(), video);
+                         fMovie ? "getdetails" : "getepisodedetails", GetPathSettingsAsJSON(),
+                         uniqueIDs, video);
 
   std::string sFunc = fMovie ? "GetDetails" : "GetEpisodeDetails";
   std::vector<std::string> vcsIn;

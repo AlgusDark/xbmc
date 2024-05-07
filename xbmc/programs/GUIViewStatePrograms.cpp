@@ -9,6 +9,7 @@
 #include "GUIViewStatePrograms.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "filesystem/Directory.h"
 #include "guilib/LocalizeStrings.h"
@@ -52,7 +53,6 @@ std::string CGUIViewStateWindowPrograms::GetExtensions()
 
 VECSOURCES& CGUIViewStateWindowPrograms::GetSources()
 {
-  AddAddonsSource("executable", g_localizeStrings.Get(1043), "DefaultAddonProgram.png");
 #if defined(TARGET_ANDROID)
   {
     CMediaSource source;

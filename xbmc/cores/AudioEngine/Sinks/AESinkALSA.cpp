@@ -11,13 +11,12 @@
 #include "ServiceBroker.h"
 #include "cores/AudioEngine/AESinkFactory.h"
 #include "cores/AudioEngine/Sinks/alsa/ALSADeviceMonitor.h"
+#ifndef HAVE_X11
 #include "cores/AudioEngine/Sinks/alsa/ALSAHControlMonitor.h"
+#endif
 #include "cores/AudioEngine/Utils/AEELDParser.h"
 #include "cores/AudioEngine/Utils/AEUtil.h"
 #include "platform/Platform.h"
-#include "threads/SingleLock.h"
-#include "utils/MathUtils.h"
-#include "utils/SystemInfo.h"
 #include "utils/XTimeUtils.h"
 #include "utils/log.h"
 
@@ -72,6 +71,21 @@ static unsigned int ALSASampleRateList[] =
   0
 };
 
+namespace
+{
+struct SndConfigDeleter
+{
+  void operator()(snd_config_t* p) { snd_config_delete(p); }
+};
+
+inline std::unique_ptr<snd_config_t, SndConfigDeleter> SndConfigCopy(snd_config_t* original)
+{
+  snd_config_t* config;
+  snd_config_copy(&config, original);
+  return std::unique_ptr<snd_config_t, SndConfigDeleter>(config, SndConfigDeleter());
+}
+} // namespace
+
 CAESinkALSA::CAESinkALSA() :
   m_pcm(NULL)
 {
@@ -95,14 +109,13 @@ void CAESinkALSA::Register()
   AE::CAESinkFactory::RegisterSink(entry);
 }
 
-IAESink* CAESinkALSA::Create(std::string &device, AEAudioFormat& desiredFormat)
+std::unique_ptr<IAESink> CAESinkALSA::Create(std::string& device, AEAudioFormat& desiredFormat)
 {
-  IAESink* sink = new CAESinkALSA();
+  auto sink = std::make_unique<CAESinkALSA>();
   if (sink->Initialize(desiredFormat, device))
     return sink;
 
-  delete sink;
-  return nullptr;
+  return {};
 }
 
 inline CAEChannelInfo CAESinkALSA::GetChannelLayoutRaw(const AEAudioFormat& format)
@@ -524,13 +537,11 @@ bool CAESinkALSA::Initialize(AEAudioFormat &format, std::string &device)
   CLog::Log(LOGINFO, "CAESinkALSA::Initialize - Attempting to open device \"{}\"", device);
 
   /* get the sound config */
-  snd_config_t *config;
-  snd_config_copy(&config, snd_config);
+  std::unique_ptr<snd_config_t, SndConfigDeleter> config = SndConfigCopy(snd_config);
 
-  if (!OpenPCMDevice(device, AESParams, inconfig.channels, &m_pcm, config))
+  if (!OpenPCMDevice(device, AESParams, inconfig.channels, &m_pcm, config.get()))
   {
     CLog::Log(LOGERROR, "CAESinkALSA::Initialize - failed to initialize device \"{}\"", device);
-    snd_config_delete(config);
     return false;
   }
 
@@ -539,9 +550,6 @@ bool CAESinkALSA::Initialize(AEAudioFormat &format, std::string &device)
   m_device = device;
 
   CLog::Log(LOGINFO, "CAESinkALSA::Initialize - Opened device \"{}\"", device);
-
-  /* free the sound config */
-  snd_config_delete(config);
 
   snd_pcm_chmap_t* selectedChmap = NULL;
   if (!m_passthrough)
@@ -1100,8 +1108,7 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
 {
 #if defined(HAVE_LIBUDEV)
   const auto deviceMonitor = CServiceBroker::GetPlatform().GetService<CALSADeviceMonitor>();
-  if (deviceMonitor)
-    deviceMonitor->Start();
+  deviceMonitor->Start();
 #endif
 
   /* ensure that ALSA has been initialized */
@@ -1114,13 +1121,11 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
     snd_config_update();
   }
 
-  snd_config_t *config;
-  snd_config_copy(&config, snd_config);
+  std::unique_ptr<snd_config_t, SndConfigDeleter> config = SndConfigCopy(snd_config);
 
 #if !defined(HAVE_X11)
   const auto controlMonitor = CServiceBroker::GetPlatform().GetService<CALSAHControlMonitor>();
-  if (controlMonitor)
-    controlMonitor->Clear();
+  controlMonitor->Clear();
 #endif
 
   /* Always enumerate the default device.
@@ -1128,7 +1133,7 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
    * will automatically add "@" instead to enable surroundXX mangling.
    * We don't want to do that if "default" can handle multichannel
    * itself (e.g. in case of a pulseaudio server). */
-  EnumerateDevice(list, "default", "", config);
+  EnumerateDevice(list, "default", "", config.get());
 
   void **hints;
 
@@ -1163,7 +1168,7 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
         /* do not enumerate basic "front", it is already handled
          * by the default "@" entry added in the very beginning */
         if (strcmp(name, "front") != 0)
-          EnumerateDevice(list, std::string("@") + (name+5), desc ? desc : name, config);
+          EnumerateDevice(list, std::string("@") + (name + 5), desc ? desc : name, config.get());
       }
 
       /* Do not enumerate "default", it is already enumerated above. */
@@ -1194,7 +1199,7 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
             && baseName != "plughw"
             && baseName != "dsnoop")
       {
-        EnumerateDevice(list, name, desc ? desc : name, config);
+        EnumerateDevice(list, name, desc ? desc : name, config.get());
       }
     }
     free(io);
@@ -1204,8 +1209,7 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
   snd_device_name_free_hint(hints);
 
 #if !defined(HAVE_X11)
-  if (controlMonitor)
-    controlMonitor->Start();
+  controlMonitor->Start();
 #endif
 
   /* set the displayname for default device */
@@ -1241,7 +1245,7 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
       if (baseName == "sysdefault" && cardsWithSurround.find(card) != cardsWithSurround.end())
         iter = list.erase(iter);
       else
-        iter++;
+        ++iter;
     }
   }
 
@@ -1257,6 +1261,8 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
 
   for (AEDeviceInfoList::iterator it1 = list.begin(); it1 != list.end(); ++it1)
   {
+    bool replaceName = false;
+
     for (AEDeviceInfoList::iterator it2 = it1+1; it2 != list.end(); ++it2)
     {
       if (it1->m_displayName == it2->m_displayName
@@ -1286,10 +1292,13 @@ void CAESinkALSA::EnumerateDevicesEx(AEDeviceInfoList &list, bool force)
         }
 
         /* if we got here, the configuration is really weird, just append the whole device string */
-        it1->m_displayName += " (" + it1->m_deviceName + ")";
+        replaceName = true;
         it2->m_displayName += " (" + it2->m_deviceName + ")";
       }
     }
+
+    if (replaceName)
+      it1->m_displayName = it1->m_displayName + " (" + it1->m_deviceName + ")";
   }
 
   for (std::set<std::string>::iterator it = cardsToAppend.begin();
@@ -1372,7 +1381,10 @@ void CAESinkALSA::EnumerateDevice(AEDeviceInfoList &list, const std::string &dev
     /* "HDA NVidia", "HDA Intel", "HDA ATI HDMI", "SB Live! 24-bit External", ... */
     char *cardName;
     if (snd_card_get_name(cardNr, &cardName) == 0)
+    {
       info.m_displayName = cardName;
+      free(cardName);
+    }
 
     if (info.m_deviceType == AE_DEVTYPE_HDMI && info.m_displayName.size() > 5 &&
         info.m_displayName.substr(info.m_displayName.size()-5) == " HDMI")
@@ -1419,8 +1431,7 @@ void CAESinkALSA::EnumerateDevice(AEDeviceInfoList &list, const std::string &dev
             /* add ELD to monitoring */
             const auto controlMonitor =
                 CServiceBroker::GetPlatform().GetService<CALSAHControlMonitor>();
-            if (controlMonitor)
-              controlMonitor->Add(strHwName, SND_CTL_ELEM_IFACE_PCM, dev, "ELD");
+            controlMonitor->Add(strHwName, SND_CTL_ELEM_IFACE_PCM, dev, "ELD");
 #endif
 
             if (!GetELD(hctl, dev, info, badHDMI))
@@ -1674,13 +1685,11 @@ void CAESinkALSA::Cleanup()
 {
 #if HAVE_LIBUDEV
   const auto deviceMonitor = CServiceBroker::GetPlatform().GetService<CALSADeviceMonitor>();
-  if (deviceMonitor)
-    deviceMonitor->Stop();
+  deviceMonitor->Stop();
 #endif
 
 #if !defined(HAVE_X11)
   const auto controlMonitor = CServiceBroker::GetPlatform().GetService<CALSAHControlMonitor>();
-  if (controlMonitor)
-    controlMonitor->Clear();
+  controlMonitor->Clear();
 #endif
 }

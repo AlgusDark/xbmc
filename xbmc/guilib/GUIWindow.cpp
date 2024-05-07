@@ -8,7 +8,6 @@
 
 #include "GUIWindow.h"
 
-#include "Application.h"
 #include "GUIAudioManager.h"
 #include "GUIComponent.h"
 #include "GUIControlFactory.h"
@@ -18,8 +17,10 @@
 #include "GUIWindowManager.h"
 #include "ServiceBroker.h"
 #include "addons/Skin.h"
-#include "input/Key.h"
 #include "input/WindowTranslator.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "input/mouse/MouseEvent.h"
 #include "messaging/ApplicationMessenger.h"
 #include "settings/AdvancedSettings.h"
 #include "settings/SettingsComponent.h"
@@ -32,6 +33,8 @@
 #include "utils/log.h"
 
 #include <mutex>
+
+using namespace KODI;
 
 bool CGUIWindow::icompare::operator()(const std::string &s1, const std::string &s2) const
 {
@@ -55,7 +58,6 @@ CGUIWindow::CGUIWindow(int id, const std::string &xmlFile)
   m_manualRunActions = false;
   m_exclusiveMouseControl = 0;
   m_clearBackground = 0xff000000; // opaque black -> always clear
-  m_windowXMLRootElement = nullptr;
   m_menuControlID = 0;
   m_menuLastFocusedControlID = 0;
   m_custom = false;
@@ -63,7 +65,6 @@ CGUIWindow::CGUIWindow(int id, const std::string &xmlFile)
 
 CGUIWindow::~CGUIWindow()
 {
-  delete m_windowXMLRootElement;
 }
 
 bool CGUIWindow::Load(const std::string& strFileName, bool bContainsPath)
@@ -146,7 +147,7 @@ bool CGUIWindow::LoadXML(const std::string &strPath, const std::string &strLower
     }
 
     // store XML for further processing if window's load type is LOAD_EVERY_TIME or a reload is needed
-    m_windowXMLRootElement = static_cast<TiXmlElement*>(xmlDoc.RootElement()->Clone());
+    m_windowXMLRootElement.reset(static_cast<TiXmlElement*>(xmlDoc.RootElement()->Clone()));
   }
   else
     CLog::Log(LOGDEBUG, "Using already stored xml root node for {}", strPath);
@@ -154,13 +155,13 @@ bool CGUIWindow::LoadXML(const std::string &strPath, const std::string &strLower
   return Load(Prepare(m_windowXMLRootElement).get());
 }
 
-std::unique_ptr<TiXmlElement> CGUIWindow::Prepare(TiXmlElement *pRootElement)
+std::unique_ptr<TiXmlElement> CGUIWindow::Prepare(const std::unique_ptr<TiXmlElement>& rootElement)
 {
-  if (!pRootElement)
+  if (!rootElement)
     return nullptr;
 
-  // clone the root element as we will manipulate it
-  auto preparedRoot = std::unique_ptr<TiXmlElement>(static_cast<TiXmlElement*>(pRootElement->Clone()));
+  // copy the root element as we will manipulate it
+  auto preparedRoot = std::make_unique<TiXmlElement>(*rootElement);
 
   // Resolve any includes, constants, expressions that may be present
   // and save include's conditions to the given map
@@ -399,7 +400,7 @@ void CGUIWindow::Close_Internal(bool forceClose /*= false*/, int nextWindowID /*
 
 void CGUIWindow::Close(bool forceClose /*= false*/, int nextWindowID /*= 0*/, bool enableSound /*= true*/, bool bWait /* = true */)
 {
-  if (!g_application.IsCurrentThread())
+  if (!CServiceBroker::GetAppMessenger()->IsProcessThread())
   {
     // make sure graphics lock is not held
     CSingleExit leaveIt(CServiceBroker::GetWinSystem()->GetGfxContext());
@@ -423,8 +424,12 @@ bool CGUIWindow::OnAction(const CAction &action)
   CGUIControl *focusedControl = GetFocusedControl();
   if (focusedControl)
   {
-    if (focusedControl->OnAction(action))
-      return true;
+    while (focusedControl && focusedControl != this)
+    {
+      if (focusedControl->OnAction(action))
+        return true;
+      focusedControl = focusedControl->GetParentControl();
+    }
   }
   else
   {
@@ -495,7 +500,8 @@ EVENT_RESULT CGUIWindow::OnMouseAction(const CAction &action)
   CServiceBroker::GetWinSystem()->GetGfxContext().InvertFinalCoords(mousePoint.x, mousePoint.y);
 
   // create the mouse event
-  CMouseEvent event(action.GetID(), action.GetHoldTime(), action.GetAmount(2), action.GetAmount(3));
+  MOUSE::CMouseEvent event(action.GetID(), action.GetHoldTime(), action.GetAmount(2),
+                           action.GetAmount(3));
   if (m_exclusiveMouseControl)
   {
     CGUIControl *child = GetControl(m_exclusiveMouseControl);
@@ -511,7 +517,7 @@ EVENT_RESULT CGUIWindow::OnMouseAction(const CAction &action)
   return SendMouseEvent(mousePoint, event);
 }
 
-EVENT_RESULT CGUIWindow::OnMouseEvent(const CPoint &point, const CMouseEvent &event)
+EVENT_RESULT CGUIWindow::OnMouseEvent(const CPoint& point, const MOUSE::CMouseEvent& event)
 {
   if (event.m_id == ACTION_MOUSE_RIGHT_CLICK)
   { // no control found to absorb this click - go to previous menu
@@ -793,8 +799,7 @@ void CGUIWindow::FreeResources(bool forceUnload /*= false */)
   if (m_loadType == LOAD_EVERY_TIME || forceUnload) ClearAll();
   if (forceUnload)
   {
-    delete m_windowXMLRootElement;
-    m_windowXMLRootElement = nullptr;
+    m_windowXMLRootElement.reset();
     m_xmlIncludeConditions.clear();
   }
 }
@@ -820,7 +825,7 @@ bool CGUIWindow::Initialize()
     return false;
   if (!NeedLoad())
     return true;
-  if (g_application.IsCurrentThread())
+  if (CServiceBroker::GetAppMessenger()->IsProcessThread())
     AllocResources(false);
   else
   {
@@ -1073,6 +1078,10 @@ void CGUIWindow::ClearBackground()
   UTILS::COLOR::Color color = m_clearBackground;
   if (color)
     CServiceBroker::GetWinSystem()->GetGfxContext().Clear(color);
+  else if (!CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_guiGeometryClear)
+    CServiceBroker::GetWinSystem()->GetGfxContext().Clear(0xff000000);
+  else
+    CServiceBroker::GetWinSystem()->GetGfxContext().Clear();
 }
 
 void CGUIWindow::SetID(int id)

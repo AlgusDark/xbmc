@@ -9,6 +9,7 @@
 #include "Control.h"
 
 #include "AddonUtils.h"
+#include "FileItemList.h"
 #include "LanguageHook.h"
 #include "ServiceBroker.h"
 #include "WindowException.h"
@@ -27,7 +28,7 @@
 #include "guilib/GUISliderControl.h"
 #include "guilib/GUITextBox.h"
 #include "guilib/GUIWindowManager.h"
-#include "listproviders/StaticProvider.h"
+#include "guilib/listproviders/StaticProvider.h"
 #include "utils/StringUtils.h"
 #include "utils/XBMCTinyXML.h"
 
@@ -201,22 +202,36 @@ namespace XBMCAddon
 
     // ============================================================
     // ============================================================
-    ControlButton::ControlButton(long x, long y, long width, long height, const String& label,
-                                 const char* focusTexture, const char* noFocusTexture,
-                                 long _textOffsetX, long _textOffsetY,
-                                 long alignment, const char* font, const char* _textColor,
-                                 const char* _disabledColor, long angle,
-                                 const char* _shadowColor, const char* _focusedColor) :
-      textOffsetX(_textOffsetX), textOffsetY(_textOffsetY),
-      align(alignment), strFont("font13"), textColor(0xffffffff), disabledColor(0x60ffffff),
-      iAngle(angle), focusedColor(0xffffffff)
+    ControlButton::ControlButton(long x,
+                                 long y,
+                                 long width,
+                                 long height,
+                                 const String& label,
+                                 const char* focusTexture,
+                                 const char* noFocusTexture,
+                                 long _textOffsetX,
+                                 long _textOffsetY,
+                                 long alignment,
+                                 const char* font,
+                                 const char* _textColor,
+                                 const char* _disabledColor,
+                                 long angle,
+                                 const char* _shadowColor,
+                                 const char* _focusedColor)
+      : textOffsetX(_textOffsetX),
+        textOffsetY(_textOffsetY),
+        align(alignment),
+        strFont("font13"),
+        textColor(0xffffffff),
+        disabledColor(0x60ffffff),
+        iAngle(angle),
+        focusedColor(0xffffffff),
+        strText(label)
     {
       dwPosX = x;
       dwPosY = y;
       dwWidth = width;
       dwHeight = height;
-
-      strText = label;
 
       // if texture is supplied use it, else get default ones
       strTextureFocus = focusTexture ? focusTexture :
@@ -433,10 +448,16 @@ namespace XBMCAddon
 
     // ============================================================
     // ============================================================
-    ControlSlider::ControlSlider(long x, long y, long width, long height,
+    ControlSlider::ControlSlider(long x,
+                                 long y,
+                                 long width,
+                                 long height,
                                  const char* textureback,
                                  const char* texture,
-                                 const char* texturefocus, int orientation)
+                                 const char* texturefocus,
+                                 int orientation,
+                                 const char* texturebackdisabled,
+                                 const char* texturedisabled)
     {
       dwPosX = x;
       dwPosY = y;
@@ -447,10 +468,12 @@ namespace XBMCAddon
       // if texture is supplied use it, else get default ones
       strTextureBack = textureback ? textureback :
         XBMCAddonUtils::getDefaultImage("slider", "texturesliderbar");
+      strTextureBackDisabled = texturebackdisabled ? texturebackdisabled : strTextureBack;
       strTexture = texture ? texture :
         XBMCAddonUtils::getDefaultImage("slider", "textureslidernib");
       strTextureFoc = texturefocus ? texturefocus :
         XBMCAddonUtils::getDefaultImage("slider", "textureslidernibfocus");
+      strTextureDisabled = texturedisabled ? texturedisabled : strTexture;
     }
 
     float ControlSlider::getPercent()
@@ -496,12 +519,13 @@ namespace XBMCAddon
       }
     }
 
-    CGUIControl* ControlSlider::Create ()
+    CGUIControl* ControlSlider::Create()
     {
-      pGUIControl = new CGUISliderControl(iParentId, iControlId,(float)dwPosX, (float)dwPosY,
-                                          (float)dwWidth,(float)dwHeight,
-                                          CTextureInfo(strTextureBack),CTextureInfo(strTexture),
-                                          CTextureInfo(strTextureFoc), 0, ORIENTATION(iOrientation));
+      pGUIControl = new CGUISliderControl(
+          iParentId, iControlId, (float)dwPosX, (float)dwPosY, (float)dwWidth, (float)dwHeight,
+          CTextureInfo(strTextureBack), CTextureInfo(strTextureBackDisabled),
+          CTextureInfo(strTexture), CTextureInfo(strTextureFoc), CTextureInfo(strTextureDisabled),
+          0, ORIENTATION(iOrientation));
 
       return pGUIControl;
     }
@@ -942,22 +966,30 @@ namespace XBMCAddon
     // ============================================================
     //  ControlLabel
     // ============================================================
-    ControlLabel::ControlLabel(long x, long y, long width, long height,
+    ControlLabel::ControlLabel(long x,
+                               long y,
+                               long width,
+                               long height,
                                const String& label,
-                               const char* font, const char* p_textColor,
+                               const char* font,
+                               const char* p_textColor,
                                const char* p_disabledColor,
                                long p_alignment,
-                               bool hasPath, long angle) :
-      strFont("font13"),
-      textColor(0xffffffff), disabledColor(0x60ffffff),
-      align(p_alignment), bHasPath(hasPath), iAngle(angle)
+                               bool hasPath,
+                               long angle)
+      : strFont("font13"),
+        strText(label),
+        textColor(0xffffffff),
+        disabledColor(0x60ffffff),
+        align(p_alignment),
+        bHasPath(hasPath),
+        iAngle(angle)
     {
       dwPosX = x;
       dwPosY = y;
       dwWidth = width;
       dwHeight = height;
 
-      strText = label;
       if (font)
         strFont = font;
 
@@ -1013,20 +1045,31 @@ namespace XBMCAddon
     // ============================================================
     //  ControlEdit
     // ============================================================
-    ControlEdit::ControlEdit(long x, long y, long width, long height, const String& label,
-                             const char* font, const char* _textColor,
+    ControlEdit::ControlEdit(long x,
+                             long y,
+                             long width,
+                             long height,
+                             const String& label,
+                             const char* font,
+                             const char* _textColor,
                              const char* _disabledColor,
-                             long _alignment, const char* focusTexture,
-                             const char* noFocusTexture) :
-      strFont("font13"), textColor(0xffffffff), disabledColor(0x60ffffff),
-      align(_alignment)
-
+                             long _alignment,
+                             const char* focusTexture,
+                             const char* noFocusTexture)
+      : strFont("font13"),
+        strTextureFocus(focusTexture ? focusTexture
+                                     : XBMCAddonUtils::getDefaultImage("edit", "texturefocus")),
+        strTextureNoFocus(noFocusTexture
+                              ? noFocusTexture
+                              : XBMCAddonUtils::getDefaultImage("edit", "texturenofocus")),
+        textColor(0xffffffff),
+        disabledColor(0x60ffffff),
+        align(_alignment)
     {
-      strTextureFocus = focusTexture ? focusTexture :
-        XBMCAddonUtils::getDefaultImage("edit", "texturefocus");
-
-      strTextureNoFocus = noFocusTexture ? noFocusTexture :
-        XBMCAddonUtils::getDefaultImage("edit", "texturenofocus");
+      dwPosX = x;
+      dwPosY = y;
+      dwWidth = width;
+      dwHeight = height;
 
       if (!label.empty())
       {
@@ -1224,7 +1267,7 @@ namespace XBMCAddon
     void ControlList::sendLabelBind(int tail)
     {
       // construct a CFileItemList to pass 'em on to the list
-      CGUIListItemPtr items(new CFileItemList());
+      std::shared_ptr<CGUIListItem> items(new CFileItemList());
       for (unsigned int i = vecItems.size() - tail; i < vecItems.size(); i++)
         static_cast<CFileItemList*>(items.get())->Add(vecItems[i]->item);
 

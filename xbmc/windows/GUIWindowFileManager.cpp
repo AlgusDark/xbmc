@@ -7,54 +7,62 @@
  */
 
 #include "GUIWindowFileManager.h"
-#include "Application.h"
+
+#include "Autorun.h"
+#include "GUIPassword.h"
+#include "GUIUserMessages.h"
+#include "PlayListPlayer.h"
 #include "ServiceBroker.h"
-#include "messaging/ApplicationMessenger.h"
+#include "URL.h"
 #include "Util.h"
-#include "filesystem/Directory.h"
-#include "filesystem/ZipManager.h"
-#include "filesystem/FileDirectoryFactory.h"
+#include "application/Application.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
+#include "cores/playercorefactory/PlayerCoreFactory.h"
 #include "dialogs/GUIDialogBusy.h"
 #include "dialogs/GUIDialogContextMenu.h"
 #include "dialogs/GUIDialogMediaSource.h"
-#include "GUIPassword.h"
-#include "GUIUserMessages.h"
-#include "interfaces/generic/ScriptInvocationManager.h"
-#include "pictures/GUIWindowSlideShow.h"
-#include "playlists/PlayListFactory.h"
-#include "network/Network.h"
-#include "guilib/GUIComponent.h"
-#include "guilib/GUIWindowManager.h"
-#include "dialogs/GUIDialogYesNo.h"
-#include "dialogs/GUIDialogTextViewer.h"
-#include "guilib/GUIKeyboardFactory.h"
 #include "dialogs/GUIDialogProgress.h"
+#include "dialogs/GUIDialogTextViewer.h"
+#include "dialogs/GUIDialogYesNo.h"
 #include "favourites/FavouritesService.h"
-#include "PlayListPlayer.h"
+#include "filesystem/Directory.h"
+#include "filesystem/FileDirectoryFactory.h"
+#include "filesystem/ZipManager.h"
+#include "guilib/GUIComponent.h"
+#include "guilib/GUIKeyboardFactory.h"
+#include "guilib/GUIWindowManager.h"
+#include "guilib/LocalizeStrings.h"
+#include "input/InputManager.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "interfaces/generic/ScriptInvocationManager.h"
+#include "messaging/ApplicationMessenger.h"
+#include "messaging/helpers/DialogOKHelper.h"
+#include "music/MusicFileItemClassify.h"
+#include "network/Network.h"
+#include "pictures/SlideShowDelegator.h"
+#include "platform/Filesystem.h"
 #include "playlists/PlayList.h"
-#include "cores/playercorefactory/PlayerCoreFactory.h"
-#include "storage/MediaManager.h"
+#include "playlists/PlayListFactory.h"
 #include "settings/MediaSourceSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
-#include "input/InputManager.h"
-#include "guilib/LocalizeStrings.h"
-#include "messaging/helpers/DialogOKHelper.h"
+#include "storage/MediaManager.h"
 #include "threads/IRunnable.h"
-#include "utils/StringUtils.h"
-#include "utils/log.h"
-#include "utils/JobManager.h"
 #include "utils/FileOperationJob.h"
 #include "utils/FileUtils.h"
+#include "utils/JobManager.h"
+#include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/Variant.h"
-#include "Autorun.h"
-#include "URL.h"
-#include "platform/Filesystem.h"
+#include "utils/log.h"
+#include "video/VideoFileItemClassify.h"
 
 using namespace XFILE;
-using namespace PLAYLIST;
+using namespace KODI;
 using namespace KODI::MESSAGING;
+using namespace KODI::VIDEO;
 
 #define CONTROL_BTNSELECTALL            1
 #define CONTROL_BTNFAVOURITES           2
@@ -84,8 +92,8 @@ namespace
 class CGetDirectoryItems : public IRunnable
 {
 public:
-  CGetDirectoryItems(XFILE::CVirtualDirectory &dir, CURL &url, CFileItemList &items)
-  : m_result(false), m_dir(dir), m_url(url), m_items(items)
+  CGetDirectoryItems(XFILE::CVirtualDirectory& dir, CURL& url, CFileItemList& items)
+    : m_dir(dir), m_url(url), m_items(items)
   {
   }
   void Run() override
@@ -96,7 +104,8 @@ public:
   {
     m_dir.CancelDirectory();
   }
-  bool m_result;
+  bool m_result = false;
+
 protected:
   XFILE::CVirtualDirectory &m_dir;
   CURL m_url;
@@ -188,7 +197,7 @@ bool CGUIWindowFileManager::OnAction(const CAction &action)
     }
     if (action.GetID() == ACTION_PLAYER_PLAY)
     {
-#ifdef HAS_DVD_DRIVE
+#ifdef HAS_OPTICAL_DRIVE
       if (m_vecItems[list]->Get(GetSelectedItem(list))->IsDVD())
         return MEDIA_DETECT::CAutorun::PlayDiscAskResume(m_vecItems[list]->Get(GetSelectedItem(list))->GetPath());
 #endif
@@ -458,7 +467,7 @@ bool CGUIWindowFileManager::Update(int iList, const std::string &strDirectory)
     if (!pItem->IsParentFolder())
     {
       GetDirectoryHistoryString(pItem.get(), strSelectedItem);
-      m_history[iList].SetSelectedItem(strSelectedItem, m_Directory[iList]->GetPath());
+      m_history[iList].SetSelectedItem(strSelectedItem, m_Directory[iList]->GetPath(), iItem);
     }
   }
 
@@ -519,6 +528,13 @@ bool CGUIWindowFileManager::Update(int iList, const std::string &strDirectory)
     #ifdef TARGET_DARWIN_EMBEDDED
       CFileItemPtr iItem(new CFileItem("special://envhome/Documents/Inbox", true));
       iItem->SetLabel("Inbox");
+      iItem->SetArt("thumb", "DefaultFolder.png");
+      iItem->SetLabelPreformatted(true);
+      m_vecItems[iList]->Add(iItem);
+    #endif
+    #ifdef TARGET_ANDROID
+      CFileItemPtr iItem(new CFileItem("special://logpath", true));
+      iItem->SetLabel("Logs");
       iItem->SetArt("thumb", "DefaultFolder.png");
       iItem->SetLabelPreformatted(true);
       m_vecItems[iList]->Add(iItem);
@@ -631,7 +647,7 @@ void CGUIWindowFileManager::OnStart(CFileItem *pItem, const std::string &player)
   if (pItem->IsPlayList())
   {
     const std::string& strPlayList = pItem->GetPath();
-    std::unique_ptr<CPlayList> pPlayList (CPlayListFactory::Create(strPlayList));
+    std::unique_ptr<PLAYLIST::CPlayList> pPlayList(PLAYLIST::CPlayListFactory::Create(strPlayList));
     if (nullptr != pPlayList)
     {
       if (!pPlayList->Load(strPlayList))
@@ -640,10 +656,10 @@ void CGUIWindowFileManager::OnStart(CFileItem *pItem, const std::string &player)
         return;
       }
     }
-    g_application.ProcessAndStartPlaylist(strPlayList, *pPlayList, PLAYLIST_MUSIC);
+    g_application.ProcessAndStartPlaylist(strPlayList, *pPlayList, PLAYLIST::TYPE_MUSIC);
     return;
   }
-  if (pItem->IsAudio() || pItem->IsVideo())
+  if (MUSIC::IsAudio(*pItem) || IsVideo(*pItem))
   {
     CServiceBroker::GetPlaylistPlayer().Play(std::make_shared<CFileItem>(*pItem), player);
     return;
@@ -662,15 +678,15 @@ void CGUIWindowFileManager::OnStart(CFileItem *pItem, const std::string &player)
 #endif
   if (pItem->IsPicture())
   {
-    CGUIWindowSlideShow *pSlideShow = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
-    if (!pSlideShow)
-      return ;
-    if (g_application.GetAppPlayer().IsPlayingVideo())
+    const auto& components = CServiceBroker::GetAppComponents();
+    const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+    if (appPlayer->IsPlayingVideo())
       g_application.StopPlaying();
 
-    pSlideShow->Reset();
-    pSlideShow->Add(pItem);
-    pSlideShow->Select(pItem->GetPath());
+    CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
+    slideShow.Reset();
+    slideShow.Add(pItem);
+    slideShow.Select(pItem->GetPath());
 
     CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_SLIDESHOW);
     return;

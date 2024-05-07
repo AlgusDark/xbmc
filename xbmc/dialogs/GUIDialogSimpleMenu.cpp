@@ -9,22 +9,27 @@
 
 #include "GUIDialogSimpleMenu.h"
 
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIDialogSelect.h"
 #include "ServiceBroker.h"
 #include "URL.h"
 #include "dialogs/GUIDialogBusy.h"
 #include "filesystem/Directory.h"
-#include "filesystem/File.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "settings/DiscSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "threads/IRunnable.h"
+#include "utils/FileUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/Variant.h"
 #include "utils/log.h"
+#include "video/VideoFileItemClassify.h"
 #include "video/VideoInfoTag.h"
+
+using namespace KODI;
 
 namespace
 {
@@ -47,13 +52,18 @@ protected:
 };
 }
 
-
-bool CGUIDialogSimpleMenu::ShowPlaySelection(CFileItem& item)
+bool CGUIDialogSimpleMenu::ShowPlaySelection(CFileItem& item, bool forceSelection /* = false */)
 {
   if (CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt(CSettings::SETTING_DISC_PLAYBACK) != BD_PLAYBACK_SIMPLE_MENU)
     return true;
 
-  if (item.IsBDFile())
+  if (forceSelection && VIDEO::IsBlurayPlaylist(item))
+  {
+    item.SetProperty("save_dyn_path", item.GetDynPath()); // save for screen refresh later
+    item.SetDynPath(item.GetBlurayPath());
+  }
+
+  if (VIDEO::IsBDFile(item))
   {
     std::string root = URIUtils::GetParentPath(item.GetDynPath());
     URIUtils::RemoveSlashAtEnd(root);
@@ -71,7 +81,7 @@ bool CGUIDialogSimpleMenu::ShowPlaySelection(CFileItem& item)
     CURL url2("udf://");
     url2.SetHostName(item.GetDynPath());
     url2.SetFileName("BDMV/index.bdmv");
-    if (XFILE::CFile::Exists(url2.Get()))
+    if (CFileUtils::Exists(url2.Get()))
     {
       url2.SetFileName("");
 
@@ -122,10 +132,14 @@ bool CGUIDialogSimpleMenu::ShowPlaySelection(CFileItem& item, const std::string&
 
     if (item_new->m_bIsFolder == false)
     {
-      std::string original_path = item.GetDynPath();
+      std::string path;
+      if (item.HasProperty("save_dyn_path"))
+        path = item.GetProperty("save_dyn_path").asString();
+      else
+        path = item.GetDynPath(); // If not set above (choose playlist selected)
       item.SetDynPath(item_new->GetDynPath());
       item.SetProperty("get_stream_details_from_player", true);
-      item.SetProperty("original_listitem_url", original_path);
+      item.SetProperty("original_listitem_url", path);
       return true;
     }
 

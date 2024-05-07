@@ -8,13 +8,13 @@
 
 #include "LinuxRendererGLES.h"
 
-#include "Application.h"
 #include "RenderCapture.h"
 #include "RenderCaptureGLES.h"
 #include "RenderFactory.h"
 #include "ServiceBroker.h"
 #include "VideoShaders/VideoFilterShaderGLES.h"
 #include "VideoShaders/YUV2RGBShaderGLES.h"
+#include "application/Application.h"
 #include "cores/IPlayer.h"
 #include "guilib/Texture.h"
 #include "rendering/MatrixGL.h"
@@ -36,7 +36,6 @@ using namespace Shaders::GLES;
 
 CLinuxRendererGLES::CLinuxRendererGLES()
 {
-  m_textureTarget = GL_TEXTURE_2D;
   m_format = AV_PIX_FMT_NONE;
 
   m_fullRange = !CServiceBroker::GetWinSystem()->UseLimitedColor();
@@ -115,8 +114,7 @@ bool CLinuxRendererGLES::Configure(const VideoPicture &picture, float fps, unsig
   m_sourceHeight = picture.iHeight;
   m_renderOrientation = orientation;
 
-  m_srcPrimaries = GetSrcPrimaries(static_cast<AVColorPrimaries>(picture.color_primaries),
-                                   picture.iWidth, picture.iHeight);
+  m_srcPrimaries = picture.color_primaries;
   m_toneMap = false;
 
   // Calculate the input frame aspect ratio.
@@ -170,8 +168,8 @@ void CLinuxRendererGLES::AddVideoPicture(const VideoPicture &picture, int index)
   buf.videoBuffer = picture.videoBuffer;
   buf.videoBuffer->Acquire();
   buf.loaded = false;
-  buf.m_srcPrimaries = static_cast<AVColorPrimaries>(picture.color_primaries);
-  buf.m_srcColSpace = static_cast<AVColorSpace>(picture.color_space);
+  buf.m_srcPrimaries = picture.color_primaries;
+  buf.m_srcColSpace = picture.color_space;
   buf.m_srcFullRange = picture.color_range == 1;
   buf.m_srcBits = picture.colorBits;
 
@@ -359,6 +357,63 @@ void CLinuxRendererGLES::Update()
   ValidateRenderTarget();
 }
 
+void CLinuxRendererGLES::ClearBackBuffer()
+{
+  //set the entire backbuffer to black
+  //if we do a two pass render, we have to draw a quad. else we might occlude OSD elements.
+  if (CServiceBroker::GetWinSystem()->GetGfxContext().GetRenderOrder() ==
+      RENDER_ORDER_ALL_BACK_TO_FRONT)
+  {
+    CServiceBroker::GetWinSystem()->GetGfxContext().Clear(0xff000000);
+  }
+  else
+  {
+    ClearBackBufferQuad();
+  }
+}
+
+void CLinuxRendererGLES::ClearBackBufferQuad()
+{
+  CRect windowRect(0, 0, CServiceBroker::GetWinSystem()->GetGfxContext().GetWidth(),
+                   CServiceBroker::GetWinSystem()->GetGfxContext().GetHeight());
+  struct Svertex
+  {
+    float x, y;
+  };
+
+  std::vector<Svertex> vertices{
+      {windowRect.x1, windowRect.y2 * 2},
+      {windowRect.x1, windowRect.y1},
+      {windowRect.x2 * 2, windowRect.y1},
+  };
+
+  glDisable(GL_BLEND);
+
+  m_renderSystem->EnableGUIShader(ShaderMethodGLES::SM_DEFAULT);
+  GLint posLoc = m_renderSystem->GUIShaderGetPos();
+  GLint uniCol = m_renderSystem->GUIShaderGetUniCol();
+  GLint depthLoc = m_renderSystem->GUIShaderGetDepth();
+
+  glUniform4f(uniCol, m_clearColour / 255.0f, m_clearColour / 255.0f, m_clearColour / 255.0f, 1.0f);
+  glUniform1f(depthLoc, -1);
+
+  GLuint vertexVBO;
+  glGenBuffers(1, &vertexVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, vertexVBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(Svertex) * vertices.size(), vertices.data(), GL_STATIC_DRAW);
+
+  glVertexAttribPointer(posLoc, 2, GL_FLOAT, GL_FALSE, sizeof(Svertex), 0);
+  glEnableVertexAttribArray(posLoc);
+
+  glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+
+  glDisableVertexAttribArray(posLoc);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glDeleteBuffers(1, &vertexVBO);
+
+  m_renderSystem->DisableGUIShader();
+}
+
 void CLinuxRendererGLES::DrawBlackBars()
 {
   CRect windowRect(0, 0, CServiceBroker::GetWinSystem()->GetGfxContext().GetWidth(),
@@ -401,8 +456,10 @@ void CLinuxRendererGLES::DrawBlackBars()
   renderSystem->EnableGUIShader(ShaderMethodGLES::SM_DEFAULT);
   GLint posLoc = renderSystem->GUIShaderGetPos();
   GLint uniCol = renderSystem->GUIShaderGetUniCol();
+  GLint depthLoc = m_renderSystem->GUIShaderGetDepth();
 
   glUniform4f(uniCol, m_clearColour / 255.0f, m_clearColour / 255.0f, m_clearColour / 255.0f, 1.0f);
+  glUniform1f(depthLoc, -1);
 
   GLuint vertexVBO;
   glGenBuffers(1, &vertexVBO);
@@ -433,6 +490,9 @@ void CLinuxRendererGLES::RenderUpdate(int index, int index2, bool clear, unsigne
   // if its first pass, just init textures and return
   if (ValidateRenderTarget())
   {
+    if (clear) //if clear is set, we're expected to overwrite all backbuffer pixels, even if we have nothing to render
+      ClearBackBuffer();
+
     return;
   }
 
@@ -457,9 +517,7 @@ void CLinuxRendererGLES::RenderUpdate(int index, int index2, bool clear, unsigne
       DrawBlackBars();
     else
     {
-      glClearColor(m_clearColour, m_clearColour, m_clearColour, 0);
-      glClear(GL_COLOR_BUFFER_BIT);
-      glClearColor(0, 0, 0, 0);
+      ClearBackBuffer();
     }
   }
 
@@ -491,7 +549,8 @@ void CLinuxRendererGLES::RenderUpdate(int index, int index2, bool clear, unsigne
     }
   }
 
-  Render(flags, index);
+  if (!Render(flags, index) && clear)
+    ClearBackBuffer();
 
   VerifyGLState();
   glEnable(GL_BLEND);
@@ -533,7 +592,7 @@ void CLinuxRendererGLES::UpdateVideoFilter()
     CLog::Log(LOGWARNING,
               "CLinuxRendererGLES::UpdateVideoFilter - chosen scaling method {}, is not supported "
               "by renderer",
-              static_cast<int>(m_scalingMethod));
+              m_scalingMethod);
     m_scalingMethod = VS_SCALINGMETHOD_LINEAR;
   }
 
@@ -720,6 +779,7 @@ void CLinuxRendererGLES::UnInit()
   m_bConfigured = false;
 
   CServiceBroker::GetWinSystem()->SetHDR(nullptr);
+  m_passthroughHDR = false;
 }
 
 bool CLinuxRendererGLES::CreateTexture(int index)
@@ -784,7 +844,7 @@ bool CLinuxRendererGLES::UploadTexture(int index)
   return ret;
 }
 
-void CLinuxRendererGLES::Render(unsigned int flags, int index)
+bool CLinuxRendererGLES::Render(unsigned int flags, int index)
 {
   // obtain current field, if interlaced
   if( flags & RENDER_FLAG_TOP)
@@ -803,7 +863,7 @@ void CLinuxRendererGLES::Render(unsigned int flags, int index)
   // call texture load function
   if (!UploadTexture(index))
   {
-    return;
+    return false;
   }
 
   if (RenderHook(index))
@@ -833,8 +893,13 @@ void CLinuxRendererGLES::Render(unsigned int flags, int index)
       break;
     }
   }
+  else
+  {
+    return false;
+  }
 
   AfterRenderHook(index);
+  return true;
 }
 
 void CLinuxRendererGLES::RenderSinglePass(int index, int field)
@@ -842,10 +907,9 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
   CPictureBuffer &buf = m_buffers[index];
   CYuvPlane (&planes)[YuvImage::MAX_PLANES] = m_buffers[index].fields[field];
 
-  AVColorPrimaries srcPrim = GetSrcPrimaries(buf.m_srcPrimaries, buf.image.width, buf.image.height);
-  if (srcPrim != m_srcPrimaries)
+  if (buf.m_srcPrimaries != m_srcPrimaries)
   {
-    m_srcPrimaries = srcPrim;
+    m_srcPrimaries = buf.m_srcPrimaries;
     m_reloadShaders = true;
   }
 
@@ -872,8 +936,6 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
   {
     LoadShaders(field);
   }
-
-  glDisable(GL_DEPTH_TEST);
 
   // Y
   glActiveTexture(GL_TEXTURE0);
@@ -977,10 +1039,9 @@ void CLinuxRendererGLES::RenderToFBO(int index, int field)
   CPictureBuffer &buf = m_buffers[index];
   CYuvPlane (&planes)[YuvImage::MAX_PLANES] = m_buffers[index].fields[field];
 
-  AVColorPrimaries srcPrim = GetSrcPrimaries(buf.m_srcPrimaries, buf.image.width, buf.image.height);
-  if (srcPrim != m_srcPrimaries)
+  if (buf.m_srcPrimaries != m_srcPrimaries)
   {
-    m_srcPrimaries = srcPrim;
+    m_srcPrimaries = buf.m_srcPrimaries;
     m_reloadShaders = true;
   }
 
@@ -1023,8 +1084,6 @@ void CLinuxRendererGLES::RenderToFBO(int index, int field)
       return;
     }
   }
-
-  glDisable(GL_DEPTH_TEST);
 
   // Y
   glActiveTexture(GL_TEXTURE0);
@@ -1234,6 +1293,9 @@ void CLinuxRendererGLES::RenderFromFBO()
 
   glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_BYTE, idx);
 
+  glDisableVertexAttribArray(loc);
+  glDisableVertexAttribArray(vertLoc);
+
   VerifyGLState();
 
   if (m_pVideoFilterShader)
@@ -1247,7 +1309,7 @@ void CLinuxRendererGLES::RenderFromFBO()
   VerifyGLState();
 }
 
-bool CLinuxRendererGLES::RenderCapture(CRenderCapture* capture)
+bool CLinuxRendererGLES::RenderCapture(int index, CRenderCapture* capture)
 {
   if (!m_bValidated)
   {
@@ -1273,7 +1335,7 @@ bool CLinuxRendererGLES::RenderCapture(CRenderCapture* capture)
 
   capture->BeginRender();
 
-  Render(RENDER_FLAG_NOOSD, m_iYV12RenderBuffer);
+  Render(RENDER_FLAG_NOOSD, index);
   // read pixels
   glReadPixels(0, CServiceBroker::GetWinSystem()->GetGfxContext().GetHeight() - capture->GetHeight(), capture->GetWidth(), capture->GetHeight(),
                GL_RGBA, GL_UNSIGNED_BYTE, capture->GetRenderBuffer());
@@ -1678,7 +1740,7 @@ void CLinuxRendererGLES::SetTextureFilter(GLenum method)
   }
 }
 
-bool CLinuxRendererGLES::Supports(ERENDERFEATURE feature)
+bool CLinuxRendererGLES::Supports(ERENDERFEATURE feature) const
 {
   if (feature == RENDERFEATURE_GAMMA ||
       feature == RENDERFEATURE_NOISE ||
@@ -1709,7 +1771,7 @@ bool CLinuxRendererGLES::SupportsMultiPassRendering()
   return true;
 }
 
-bool CLinuxRendererGLES::Supports(ESCALINGMETHOD method)
+bool CLinuxRendererGLES::Supports(ESCALINGMETHOD method) const
 {
   if(method == VS_SCALINGMETHOD_NEAREST ||
      method == VS_SCALINGMETHOD_LINEAR)
@@ -1739,16 +1801,7 @@ bool CLinuxRendererGLES::Supports(ESCALINGMETHOD method)
 
     if (m_renderMethod & RENDER_GLSL)
     {
-      // spline36 and lanczos3 are only allowed through advancedsettings.xml
-      if(method != VS_SCALINGMETHOD_SPLINE36 &&
-         method != VS_SCALINGMETHOD_LANCZOS3)
-      {
-        return true;
-      }
-      else
-      {
-        return CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_videoEnableHighQualityHwScalers;
-      }
+      return true;
     }
   }
 
@@ -1766,24 +1819,6 @@ CRenderInfo CLinuxRendererGLES::GetRenderInfo()
 bool CLinuxRendererGLES::IsGuiLayer()
 {
   return true;
-}
-
-AVColorPrimaries CLinuxRendererGLES::GetSrcPrimaries(AVColorPrimaries srcPrimaries, unsigned int width, unsigned int height)
-{
-  AVColorPrimaries ret = srcPrimaries;
-  if (ret == AVCOL_PRI_UNSPECIFIED)
-  {
-    if (width > 1024 || height >= 600)
-    {
-      ret = AVCOL_PRI_BT709;
-    }
-    else
-    {
-      ret = AVCOL_PRI_BT470BG;
-    }
-  }
-
-  return ret;
 }
 
 CRenderCapture* CLinuxRendererGLES::GetRenderCapture()

@@ -16,6 +16,8 @@
 
 #ifdef __cplusplus
 
+#include "tools/StringUtils.h"
+
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -23,8 +25,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#include "tools/StringUtils.h"
 
 namespace kodi
 {
@@ -132,7 +132,9 @@ public:
 
   const CStructHdl& operator=(const CStructHdl& right)
   {
-    assert(&right.m_cStructure);
+    if (this == &right)
+      return *this;
+
     if (m_cStructure && !m_owner)
     {
       memcpy(m_cStructure, right.m_cStructure, sizeof(C_STRUCT));
@@ -150,6 +152,10 @@ public:
   const CStructHdl& operator=(const C_STRUCT& right)
   {
     assert(&right);
+
+    if (m_cStructure == &right)
+      return *this;
+
     if (m_cStructure && !m_owner)
     {
       memcpy(m_cStructure, &right, sizeof(C_STRUCT));
@@ -1045,7 +1051,6 @@ inline std::string ATTR_DLL_LOCAL GetLocalizedString(uint32_t labelId,
   return retString;
 }
 //------------------------------------------------------------------------------
-
 
 //##############################################################################
 /// @ingroup cpp_kodi_addon

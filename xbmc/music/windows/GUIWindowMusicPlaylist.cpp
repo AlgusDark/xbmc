@@ -8,19 +8,24 @@
 
 #include "GUIWindowMusicPlaylist.h"
 
-#include "Application.h"
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIUserMessages.h"
 #include "PartyModeManager.h"
 #include "PlayListPlayer.h"
 #include "ServiceBroker.h"
 #include "Util.h"
-#include "cores/playercorefactory/PlayerCoreFactory.h"
+#include "application/Application.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "dialogs/GUIDialogSmartPlaylistEditor.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIKeyboardFactory.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
+#include "music/MusicFileItemClassify.h"
 #include "music/tags/MusicInfoTag.h"
 #include "playlists/PlayListM3U.h"
 #include "profiles/ProfileManager.h"
@@ -34,24 +39,24 @@
 #include "utils/log.h"
 #include "view/GUIViewState.h"
 
-using namespace PLAYLIST;
+using namespace KODI;
 
-#define CONTROL_BTNVIEWASICONS     2
-#define CONTROL_BTNSORTBY          3
-#define CONTROL_BTNSORTASC         4
-#define CONTROL_LABELFILES        12
+#define CONTROL_BTNVIEWASICONS 2
+#define CONTROL_BTNSORTBY 3
+#define CONTROL_BTNSORTASC 4
+#define CONTROL_LABELFILES 12
 
-#define CONTROL_BTNSHUFFLE        20
-#define CONTROL_BTNSAVE           21
-#define CONTROL_BTNCLEAR          22
+#define CONTROL_BTNSHUFFLE 20
+#define CONTROL_BTNSAVE 21
+#define CONTROL_BTNCLEAR 22
 
-#define CONTROL_BTNPLAY           23
-#define CONTROL_BTNNEXT           24
-#define CONTROL_BTNPREVIOUS       25
-#define CONTROL_BTNREPEAT         26
+#define CONTROL_BTNPLAY 23
+#define CONTROL_BTNNEXT 24
+#define CONTROL_BTNPREVIOUS 25
+#define CONTROL_BTNREPEAT 26
 
 CGUIWindowMusicPlayList::CGUIWindowMusicPlayList(void)
-    : CGUIWindowMusicBase(WINDOW_MUSIC_PLAYLIST, "MyPlaylist.xml")
+  : CGUIWindowMusicBase(WINDOW_MUSIC_PLAYLIST, "MyPlaylist.xml")
 {
   m_musicInfoLoader.SetObserver(this);
   m_movingFrom = -1;
@@ -61,16 +66,16 @@ CGUIWindowMusicPlayList::~CGUIWindowMusicPlayList(void) = default;
 
 bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
 {
-  switch ( message.GetMessage() )
+  switch (message.GetMessage())
   {
-  case GUI_MSG_PLAYLISTPLAYER_REPEAT:
+    case GUI_MSG_PLAYLISTPLAYER_REPEAT:
     {
       UpdateButtons();
     }
     break;
 
-  case GUI_MSG_PLAYLISTPLAYER_RANDOM:
-  case GUI_MSG_PLAYLIST_CHANGED:
+    case GUI_MSG_PLAYLISTPLAYER_RANDOM:
+    case GUI_MSG_PLAYLIST_CHANGED:
     {
       // global playlist changed outside playlist window
       UpdateButtons();
@@ -89,11 +94,10 @@ bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
         m_iLastControl = CONTROL_BTNVIEWASICONS;
         SET_CONTROL_FOCUS(m_iLastControl, 0);
       }
-
     }
     break;
 
-  case GUI_MSG_WINDOW_DEINIT:
+    case GUI_MSG_WINDOW_DEINIT:
     {
       if (m_musicInfoLoader.IsLoading())
         m_musicInfoLoader.StopThread();
@@ -102,7 +106,7 @@ bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
     }
     break;
 
-  case GUI_MSG_WINDOW_INIT:
+    case GUI_MSG_WINDOW_INIT:
     {
       // Setup item cache for tagloader
       m_musicInfoLoader.UseCacheOnHD("special://temp/archive_cache/MusicPlaylist.fi");
@@ -119,9 +123,12 @@ bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
         SET_CONTROL_FOCUS(m_iLastControl, 0);
       }
 
-      if (g_application.GetAppPlayer().IsPlayingAudio() && CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST_MUSIC)
+      const auto& components = CServiceBroker::GetAppComponents();
+      const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+      if (appPlayer->IsPlayingAudio() &&
+          CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST::TYPE_MUSIC)
       {
-        int iSong = CServiceBroker::GetPlaylistPlayer().GetCurrentSong();
+        int iSong = CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx();
         if (iSong >= 0 && iSong <= m_vecItems->Size())
           m_viewControl.SetSelectedItem(iSong);
       }
@@ -130,15 +137,18 @@ bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
     }
     break;
 
-  case GUI_MSG_CLICKED:
+    case GUI_MSG_CLICKED:
     {
       int iControl = message.GetSenderId();
       if (iControl == CONTROL_BTNSHUFFLE)
       {
         if (!g_partyModeManager.IsEnabled())
         {
-          CServiceBroker::GetPlaylistPlayer().SetShuffle(PLAYLIST_MUSIC, !(CServiceBroker::GetPlaylistPlayer().IsShuffled(PLAYLIST_MUSIC)));
-          CMediaSettings::GetInstance().SetMusicPlaylistShuffled(CServiceBroker::GetPlaylistPlayer().IsShuffled(PLAYLIST_MUSIC));
+          CServiceBroker::GetPlaylistPlayer().SetShuffle(
+              PLAYLIST::TYPE_MUSIC,
+              !(CServiceBroker::GetPlaylistPlayer().IsShuffled(PLAYLIST::TYPE_MUSIC)));
+          CMediaSettings::GetInstance().SetMusicPlaylistShuffled(
+              CServiceBroker::GetPlaylistPlayer().IsShuffled(PLAYLIST::TYPE_MUSIC));
           CServiceBroker::GetSettingsComponent()->GetSettings()->Save();
           UpdateButtons();
           Refresh();
@@ -161,34 +171,40 @@ bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
       else if (iControl == CONTROL_BTNPLAY)
       {
         m_guiState->SetPlaylistDirectory("playlistmusic://");
-        CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST_MUSIC);
+        CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST::TYPE_MUSIC);
         CServiceBroker::GetPlaylistPlayer().Reset();
         CServiceBroker::GetPlaylistPlayer().Play(m_viewControl.GetSelectedItem(), "");
         UpdateButtons();
       }
       else if (iControl == CONTROL_BTNNEXT)
       {
-        CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST_MUSIC);
+        CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST::TYPE_MUSIC);
         CServiceBroker::GetPlaylistPlayer().PlayNext();
       }
       else if (iControl == CONTROL_BTNPREVIOUS)
       {
-        CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST_MUSIC);
+        CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST::TYPE_MUSIC);
         CServiceBroker::GetPlaylistPlayer().PlayPrevious();
       }
       else if (iControl == CONTROL_BTNREPEAT)
       {
         // increment repeat state
-        PLAYLIST::REPEAT_STATE state = CServiceBroker::GetPlaylistPlayer().GetRepeat(PLAYLIST_MUSIC);
-        if (state == PLAYLIST::REPEAT_NONE)
-          CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_MUSIC, PLAYLIST::REPEAT_ALL);
-        else if (state == PLAYLIST::REPEAT_ALL)
-          CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_MUSIC, PLAYLIST::REPEAT_ONE);
+        PLAYLIST::RepeatState state =
+            CServiceBroker::GetPlaylistPlayer().GetRepeat(PLAYLIST::TYPE_MUSIC);
+        if (state == PLAYLIST::RepeatState::NONE)
+          CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_MUSIC,
+                                                        PLAYLIST::RepeatState::ALL);
+        else if (state == PLAYLIST::RepeatState::ALL)
+          CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_MUSIC,
+                                                        PLAYLIST::RepeatState::ONE);
         else
-          CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_MUSIC, PLAYLIST::REPEAT_NONE);
+          CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_MUSIC,
+                                                        PLAYLIST::RepeatState::NONE);
 
         // save settings
-        CMediaSettings::GetInstance().SetMusicPlaylistRepeat(CServiceBroker::GetPlaylistPlayer().GetRepeat(PLAYLIST_MUSIC) == PLAYLIST::REPEAT_ALL);
+        CMediaSettings::GetInstance().SetMusicPlaylistRepeat(
+            CServiceBroker::GetPlaylistPlayer().GetRepeat(PLAYLIST::TYPE_MUSIC) ==
+            PLAYLIST::RepeatState::ALL);
         CServiceBroker::GetSettingsComponent()->GetSettings()->Save();
 
         UpdateButtons();
@@ -205,12 +221,11 @@ bool CGUIWindowMusicPlayList::OnMessage(CGUIMessage& message)
       }
     }
     break;
-
   }
   return CGUIWindowMusicBase::OnMessage(message);
 }
 
-bool CGUIWindowMusicPlayList::OnAction(const CAction &action)
+bool CGUIWindowMusicPlayList::OnAction(const CAction& action)
 {
   if (action.GetID() == ACTION_PARENT_DIR)
   {
@@ -243,7 +258,9 @@ bool CGUIWindowMusicPlayList::OnBack(int actionID)
   return CGUIWindowMusicBase::OnBack(actionID);
 }
 
-bool CGUIWindowMusicPlayList::MoveCurrentPlayListItem(int iItem, int iAction, bool bUpdate /* = true */)
+bool CGUIWindowMusicPlayList::MoveCurrentPlayListItem(int iItem,
+                                                      int iAction,
+                                                      bool bUpdate /* = true */)
 {
   int iSelected = iItem;
   int iNew = iSelected;
@@ -252,24 +269,30 @@ bool CGUIWindowMusicPlayList::MoveCurrentPlayListItem(int iItem, int iAction, bo
   else
     iNew++;
 
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+
   // is the currently playing item affected?
   bool bFixCurrentSong = false;
-  if ((CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST_MUSIC) && (g_application.GetAppPlayer().IsPlayingAudio()) &&
-    ((CServiceBroker::GetPlaylistPlayer().GetCurrentSong() == iSelected) || (CServiceBroker::GetPlaylistPlayer().GetCurrentSong() == iNew)))
+  if ((CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST::TYPE_MUSIC) &&
+      appPlayer->IsPlayingAudio() &&
+      ((CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx() == iSelected) ||
+       (CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx() == iNew)))
     bFixCurrentSong = true;
 
-  CPlayList& playlist = CServiceBroker::GetPlaylistPlayer().GetPlaylist(PLAYLIST_MUSIC);
+  PLAYLIST::CPlayList& playlist =
+      CServiceBroker::GetPlaylistPlayer().GetPlaylist(PLAYLIST::TYPE_MUSIC);
   if (playlist.Swap(iSelected, iNew))
   {
     // Correct the current playing song in playlistplayer
     if (bFixCurrentSong)
     {
-      int iCurrentSong = CServiceBroker::GetPlaylistPlayer().GetCurrentSong();
+      int iCurrentSong = CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx();
       if (iSelected == iCurrentSong)
         iCurrentSong = iNew;
       else if (iNew == iCurrentSong)
         iCurrentSong = iSelected;
-      CServiceBroker::GetPlaylistPlayer().SetCurrentSong(iCurrentSong);
+      CServiceBroker::GetPlaylistPlayer().SetCurrentItemIdx(iCurrentSong);
     }
 
     if (bUpdate)
@@ -283,15 +306,16 @@ bool CGUIWindowMusicPlayList::MoveCurrentPlayListItem(int iItem, int iAction, bo
 void CGUIWindowMusicPlayList::SavePlayList()
 {
   std::string strNewFileName;
-  if (CGUIKeyboardFactory::ShowAndGetInput(strNewFileName, CVariant{g_localizeStrings.Get(16012)}, false))
+  if (CGUIKeyboardFactory::ShowAndGetInput(strNewFileName, CVariant{g_localizeStrings.Get(16012)},
+                                           false))
   {
     // need 2 rename it
-    strNewFileName = CUtil::MakeLegalFileName(strNewFileName);
-    strNewFileName += ".m3u";
-    std::string strPath = URIUtils::AddFileToFolder(
-      CServiceBroker::GetSettingsComponent()->GetSettings()->GetString(CSettings::SETTING_SYSTEM_PLAYLISTSPATH),
-      "music",
-      strNewFileName);
+    strNewFileName = CUtil::MakeLegalFileName(std::move(strNewFileName));
+    strNewFileName += ".m3u8";
+    std::string strPath =
+        URIUtils::AddFileToFolder(CServiceBroker::GetSettingsComponent()->GetSettings()->GetString(
+                                      CSettings::SETTING_SYSTEM_PLAYLISTSPATH),
+                                  "music", strNewFileName);
 
     // get selected item
     int iItem = m_viewControl.GetSelectedItem();
@@ -306,16 +330,16 @@ void CGUIWindowMusicPlayList::SavePlayList()
     }
 
     std::string strOldDirectory = m_vecItems->GetPath();
-    m_history.SetSelectedItem(strSelectedItem, strOldDirectory);
+    m_history.SetSelectedItem(strSelectedItem, strOldDirectory, iItem);
 
-    CPlayListM3U playlist;
+    PLAYLIST::CPlayListM3U playlist;
     for (int i = 0; i < m_vecItems->Size(); ++i)
     {
       CFileItemPtr pItem = m_vecItems->Get(i);
 
       //  Musicdatabase items should contain the real path instead of a musicdb url
       //  otherwise the user can't save and reuse the playlist when the musicdb gets deleted
-      if (pItem->IsMusicDb())
+      if (MUSIC::IsMusicDb(*pItem))
         pItem->SetPath(pItem->GetMusicInfoTag()->GetURL());
 
       playlist.Add(pItem);
@@ -329,11 +353,11 @@ void CGUIWindowMusicPlayList::SavePlayList()
 void CGUIWindowMusicPlayList::ClearPlayList()
 {
   ClearFileItems();
-  CServiceBroker::GetPlaylistPlayer().ClearPlaylist(PLAYLIST_MUSIC);
-  if (CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST_MUSIC)
+  CServiceBroker::GetPlaylistPlayer().ClearPlaylist(PLAYLIST::TYPE_MUSIC);
+  if (CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST::TYPE_MUSIC)
   {
     CServiceBroker::GetPlaylistPlayer().Reset();
-    CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST_NONE);
+    CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST::TYPE_NONE);
   }
   Refresh();
   SET_CONTROL_FOCUS(CONTROL_BTNVIEWASICONS, 0);
@@ -341,14 +365,18 @@ void CGUIWindowMusicPlayList::ClearPlayList()
 
 void CGUIWindowMusicPlayList::RemovePlayListItem(int iItem)
 {
-  if (iItem < 0 || iItem > m_vecItems->Size()) return;
+  if (iItem < 0 || iItem > m_vecItems->Size())
+    return;
 
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
   // The current playing song can't be removed
-  if (CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST_MUSIC && g_application.GetAppPlayer().IsPlayingAudio()
-      && CServiceBroker::GetPlaylistPlayer().GetCurrentSong() == iItem)
-    return ;
+  if (CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST::TYPE_MUSIC &&
+      appPlayer->IsPlayingAudio() &&
+      CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx() == iItem)
+    return;
 
-  CServiceBroker::GetPlaylistPlayer().Remove(PLAYLIST_MUSIC, iItem);
+  CServiceBroker::GetPlaylistPlayer().Remove(PLAYLIST::TYPE_MUSIC, iItem);
 
   Refresh();
 
@@ -377,7 +405,10 @@ void CGUIWindowMusicPlayList::UpdateButtons()
     CONTROL_ENABLE(CONTROL_BTNREPEAT);
     CONTROL_ENABLE(CONTROL_BTNPLAY);
 
-    if (g_application.GetAppPlayer().IsPlayingAudio() && CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST_MUSIC)
+    const auto& components = CServiceBroker::GetAppComponents();
+    const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+    if (appPlayer->IsPlayingAudio() &&
+        CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST::TYPE_MUSIC)
     {
       CONTROL_ENABLE(CONTROL_BTNNEXT);
       CONTROL_ENABLE(CONTROL_BTNPREVIOUS);
@@ -402,12 +433,21 @@ void CGUIWindowMusicPlayList::UpdateButtons()
 
   // update buttons
   CONTROL_DESELECT(CONTROL_BTNSHUFFLE);
-  if (CServiceBroker::GetPlaylistPlayer().IsShuffled(PLAYLIST_MUSIC))
+  if (CServiceBroker::GetPlaylistPlayer().IsShuffled(PLAYLIST::TYPE_MUSIC))
     CONTROL_SELECT(CONTROL_BTNSHUFFLE);
 
   // update repeat button
-  int iRepeat = 595 + CServiceBroker::GetPlaylistPlayer().GetRepeat(PLAYLIST_MUSIC);
-  SET_CONTROL_LABEL(CONTROL_BTNREPEAT, g_localizeStrings.Get(iRepeat));
+  int iLocalizedString;
+  PLAYLIST::RepeatState repState =
+      CServiceBroker::GetPlaylistPlayer().GetRepeat(PLAYLIST::TYPE_MUSIC);
+  if (repState == PLAYLIST::RepeatState::NONE)
+    iLocalizedString = 595; // Repeat: Off
+  else if (repState == PLAYLIST::RepeatState::ONE)
+    iLocalizedString = 596; // Repeat: One
+  else
+    iLocalizedString = 597; // Repeat: All
+
+  SET_CONTROL_LABEL(CONTROL_BTNREPEAT, g_localizeStrings.Get(iLocalizedString));
 
   // Update object count label
   std::string items =
@@ -417,28 +457,28 @@ void CGUIWindowMusicPlayList::UpdateButtons()
   MarkPlaying();
 }
 
-bool CGUIWindowMusicPlayList::OnPlayMedia(int iItem, const std::string &player)
+bool CGUIWindowMusicPlayList::OnPlayMedia(int iItem, const std::string& player)
 {
   if (g_partyModeManager.IsEnabled())
     g_partyModeManager.Play(iItem);
   else
   {
-    int iPlaylist=m_guiState->GetPlaylist();
-    if (iPlaylist!=PLAYLIST_NONE)
+    PLAYLIST::Id playlistId = m_guiState->GetPlaylist();
+    if (playlistId != PLAYLIST::TYPE_NONE)
     {
       if (m_guiState)
         m_guiState->SetPlaylistDirectory(m_vecItems->GetPath());
 
-      CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist( iPlaylist );
+      CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(playlistId);
       CServiceBroker::GetPlaylistPlayer().Play(iItem, player);
     }
     else
     {
       // Reset Playlistplayer, playback started now does
       // not use the playlistplayer.
-      CFileItemPtr pItem=m_vecItems->Get(iItem);
+      CFileItemPtr pItem = m_vecItems->Get(iItem);
       CServiceBroker::GetPlaylistPlayer().Reset();
-      CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST_NONE);
+      CServiceBroker::GetPlaylistPlayer().SetCurrentPlaylist(PLAYLIST::TYPE_NONE);
       g_application.PlayFile(*pItem, player);
     }
   }
@@ -450,7 +490,8 @@ void CGUIWindowMusicPlayList::OnItemLoaded(CFileItem* pItem)
 {
   if (pItem->HasMusicInfoTag() && pItem->GetMusicInfoTag()->Loaded())
   { // set label 1+2 from tags
-    const std::shared_ptr<CSettings> settings = CServiceBroker::GetSettingsComponent()->GetSettings();
+    const std::shared_ptr<CSettings> settings =
+        CServiceBroker::GetSettingsComponent()->GetSettings();
     std::string strTrack = settings->GetString(CSettings::SETTING_MUSICFILES_NOWPLAYINGTRACKFORMAT);
     if (strTrack.empty())
       strTrack = settings->GetString(CSettings::SETTING_MUSICFILES_TRACKFORMAT);
@@ -480,7 +521,8 @@ void CGUIWindowMusicPlayList::OnItemLoaded(CFileItem* pItem)
   }
 }
 
-bool CGUIWindowMusicPlayList::Update(const std::string& strDirectory, bool updateFilterPath /* = true */)
+bool CGUIWindowMusicPlayList::Update(const std::string& strDirectory,
+                                     bool updateFilterPath /* = true */)
 {
   if (m_musicInfoLoader.IsLoading())
     m_musicInfoLoader.StopThread();
@@ -495,10 +537,10 @@ bool CGUIWindowMusicPlayList::Update(const std::string& strDirectory, bool updat
   return true;
 }
 
-void CGUIWindowMusicPlayList::GetContextButtons(int itemNumber, CContextButtons &buttons)
+void CGUIWindowMusicPlayList::GetContextButtons(int itemNumber, CContextButtons& buttons)
 {
   // is this playlist playing?
-  int itemPlaying = CServiceBroker::GetPlaylistPlayer().GetCurrentSong();
+  int itemPlaying = CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx();
 
   if (itemNumber >= 0 && itemNumber < m_vecItems->Size())
   {
@@ -509,21 +551,13 @@ void CGUIWindowMusicPlayList::GetContextButtons(int itemNumber, CContextButtons 
     {
       // we can move the item to any position not where we are, and any position not above currently
       // playing item in party mode
-      if (itemNumber != m_movingFrom && (!g_partyModeManager.IsEnabled() || itemNumber > itemPlaying))
-        buttons.Add(CONTEXT_BUTTON_MOVE_HERE, 13252);         // move item here
+      if (itemNumber != m_movingFrom &&
+          (!g_partyModeManager.IsEnabled() || itemNumber > itemPlaying))
+        buttons.Add(CONTEXT_BUTTON_MOVE_HERE, 13252); // move item here
       buttons.Add(CONTEXT_BUTTON_CANCEL_MOVE, 13253);
     }
     else
     {
-      const CPlayerCoreFactory &playerCoreFactory = CServiceBroker::GetPlayerCoreFactory();
-
-      // aren't in a move
-      // check what players we have, if we have multiple display play with option
-      std::vector<std::string> players;
-      playerCoreFactory.GetPlayers(*item, players);
-      if (players.size() > 1)
-        buttons.Add(CONTEXT_BUTTON_PLAY_WITH, 15213); // Play With...
-
       if (itemNumber > (g_partyModeManager.IsEnabled() ? 1 : 0))
         buttons.Add(CONTEXT_BUTTON_MOVE_ITEM_UP, 13332);
       if (itemNumber + 1 < m_vecItems->Size())
@@ -538,7 +572,7 @@ void CGUIWindowMusicPlayList::GetContextButtons(int itemNumber, CContextButtons 
   if (g_partyModeManager.IsEnabled())
   {
     buttons.Add(CONTEXT_BUTTON_EDIT_PARTYMODE, 21439);
-    buttons.Add(CONTEXT_BUTTON_CANCEL_PARTYMODE, 588);      // cancel party mode
+    buttons.Add(CONTEXT_BUTTON_CANCEL_PARTYMODE, 588); // cancel party mode
   }
 }
 
@@ -546,76 +580,60 @@ bool CGUIWindowMusicPlayList::OnContextButton(int itemNumber, CONTEXT_BUTTON but
 {
   switch (button)
   {
-  case CONTEXT_BUTTON_PLAY_WITH:
+    case CONTEXT_BUTTON_MOVE_ITEM:
+      m_movingFrom = itemNumber;
+      return true;
+
+    case CONTEXT_BUTTON_MOVE_HERE:
+      MoveItem(m_movingFrom, itemNumber);
+      m_movingFrom = -1;
+      return true;
+
+    case CONTEXT_BUTTON_CANCEL_MOVE:
+      m_movingFrom = -1;
+      return true;
+
+    case CONTEXT_BUTTON_MOVE_ITEM_UP:
+      OnMove(itemNumber, ACTION_MOVE_ITEM_UP);
+      return true;
+
+    case CONTEXT_BUTTON_MOVE_ITEM_DOWN:
+      OnMove(itemNumber, ACTION_MOVE_ITEM_DOWN);
+      return true;
+
+    case CONTEXT_BUTTON_DELETE:
+      RemovePlayListItem(itemNumber);
+      return true;
+
+    case CONTEXT_BUTTON_CANCEL_PARTYMODE:
+      g_partyModeManager.Disable();
+      return true;
+
+    case CONTEXT_BUTTON_EDIT_PARTYMODE:
     {
-      CFileItemPtr item;
-      if (itemNumber >= 0 && itemNumber < m_vecItems->Size())
-        item = m_vecItems->Get(itemNumber);
-      if (!item)
-        break;
+      const std::shared_ptr<CProfileManager> profileManager =
+          CServiceBroker::GetSettingsComponent()->GetProfileManager();
 
-      const CPlayerCoreFactory &playerCoreFactory = CServiceBroker::GetPlayerCoreFactory();
-
-      std::vector<std::string> players;
-      playerCoreFactory.GetPlayers(*item, players);
-      std::string player = playerCoreFactory.SelectPlayerDialog(players);
-      if (!player.empty())
-        OnClick(itemNumber, player);
+      std::string playlist = profileManager->GetUserDataItem("PartyMode.xsp");
+      if (CGUIDialogSmartPlaylistEditor::EditPlaylist(playlist))
+      {
+        // apply new rules
+        g_partyModeManager.Disable();
+        g_partyModeManager.Enable();
+      }
       return true;
     }
-  case CONTEXT_BUTTON_MOVE_ITEM:
-    m_movingFrom = itemNumber;
-    return true;
 
-  case CONTEXT_BUTTON_MOVE_HERE:
-    MoveItem(m_movingFrom, itemNumber);
-    m_movingFrom = -1;
-    return true;
-
-  case CONTEXT_BUTTON_CANCEL_MOVE:
-    m_movingFrom = -1;
-    return true;
-
-  case CONTEXT_BUTTON_MOVE_ITEM_UP:
-    OnMove(itemNumber, ACTION_MOVE_ITEM_UP);
-    return true;
-
-  case CONTEXT_BUTTON_MOVE_ITEM_DOWN:
-    OnMove(itemNumber, ACTION_MOVE_ITEM_DOWN);
-    return true;
-
-  case CONTEXT_BUTTON_DELETE:
-    RemovePlayListItem(itemNumber);
-    return true;
-
-  case CONTEXT_BUTTON_CANCEL_PARTYMODE:
-    g_partyModeManager.Disable();
-    return true;
-
-  case CONTEXT_BUTTON_EDIT_PARTYMODE:
-  {
-    const std::shared_ptr<CProfileManager> profileManager = CServiceBroker::GetSettingsComponent()->GetProfileManager();
-
-    std::string playlist = profileManager->GetUserDataItem("PartyMode.xsp");
-    if (CGUIDialogSmartPlaylistEditor::EditPlaylist(playlist))
-    {
-      // apply new rules
-      g_partyModeManager.Disable();
-      g_partyModeManager.Enable();
-    }
-    return true;
-  }
-
-  default:
-    break;
+    default:
+      break;
   }
   return CGUIWindowMusicBase::OnContextButton(itemNumber, button);
 }
 
-
 void CGUIWindowMusicPlayList::OnMove(int iItem, int iAction)
 {
-  if (iItem < 0 || iItem >= m_vecItems->Size()) return;
+  if (iItem < 0 || iItem >= m_vecItems->Size())
+    return;
 
   bool bRestart = m_musicInfoLoader.IsLoading();
   if (bRestart)
@@ -629,8 +647,10 @@ void CGUIWindowMusicPlayList::OnMove(int iItem, int iAction)
 
 void CGUIWindowMusicPlayList::MoveItem(int iStart, int iDest)
 {
-  if (iStart < 0 || iStart >= m_vecItems->Size()) return;
-  if (iDest < 0 || iDest >= m_vecItems->Size()) return;
+  if (iStart < 0 || iStart >= m_vecItems->Size())
+    return;
+  if (iDest < 0 || iDest >= m_vecItems->Size())
+    return;
 
   // default to move up
   int iAction = ACTION_MOVE_ITEM_UP;
@@ -666,16 +686,15 @@ void CGUIWindowMusicPlayList::MoveItem(int iStart, int iDest)
 
 void CGUIWindowMusicPlayList::MarkPlaying()
 {
-/*  // clear markings
+  /*  // clear markings
   for (int i = 0; i < m_vecItems->Size(); i++)
     m_vecItems->Get(i)->Select(false);
 
   // mark the currently playing item
-  if ((CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == PLAYLIST_MUSIC) && (g_application.GetAppPlayer().IsPlayingAudio()))
+  if ((CServiceBroker::GetPlaylistPlayer().GetCurrentPlaylist() == TYPE_MUSIC) && (g_application.GetAppPlayer().IsPlayingAudio()))
   {
-    int iSong = CServiceBroker::GetPlaylistPlayer().GetCurrentSong();
+    int iSong = CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx();
     if (iSong >= 0 && iSong <= m_vecItems->Size())
       m_vecItems->Get(iSong)->Select(true);
   }*/
 }
-

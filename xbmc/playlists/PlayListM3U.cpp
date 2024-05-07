@@ -8,17 +8,21 @@
 
 #include "PlayListM3U.h"
 
+#include "FileItem.h"
 #include "URL.h"
 #include "Util.h"
 #include "filesystem/File.h"
+#include "music/MusicFileItemClassify.h"
 #include "music/tags/MusicInfoTag.h"
 #include "utils/CharsetConverter.h"
 #include "utils/URIUtils.h"
 #include "utils/log.h"
+#include "video/VideoFileItemClassify.h"
 #include "video/VideoInfoTag.h"
 
 #include <inttypes.h>
 
+using namespace KODI;
 using namespace PLAYLIST;
 using namespace XFILE;
 
@@ -68,6 +72,10 @@ bool CPlayListM3U::Load(const std::string& strFileName)
   int iStartOffset = 0;
   int iEndOffset = 0;
 
+  bool utf8 = false;
+  if (URIUtils::GetExtension(strFileName) == ".m3u8")
+    utf8 = true;
+
   Clear();
 
   m_strPlayListName = URIUtils::GetFileName(strFileName);
@@ -100,7 +108,8 @@ bool CPlayListM3U::Load(const std::string& strFileName)
         lDuration = atoi(strLength.c_str());
         iComma++;
         strInfo = strLine.substr(iComma);
-        g_charsetConverter.unknownToUTF8(strInfo);
+        if (!utf8)
+          g_charsetConverter.unknownToUTF8(strInfo);
       }
     }
     else if (StringUtils::StartsWith(strLine, OffsetMarker))
@@ -149,7 +158,8 @@ bool CPlayListM3U::Load(const std::string& strFileName)
 
       if (strFileName.length() > 0)
       {
-        g_charsetConverter.unknownToUTF8(strFileName);
+        if (!utf8)
+          g_charsetConverter.unknownToUTF8(strFileName);
 
         // If no info was read from from the extended tag information, use the file name
         if (strInfo.length() == 0)
@@ -166,19 +176,20 @@ bool CPlayListM3U::Load(const std::string& strFileName)
         newItem->SetPath(strFileName);
         if (iStartOffset != 0 || iEndOffset != 0)
         {
-          newItem->m_lStartOffset = iStartOffset;
+          newItem->SetStartOffset(iStartOffset);
           newItem->m_lStartPartNumber = 1;
           newItem->SetProperty("item_start", iStartOffset);
-          newItem->m_lEndOffset = iEndOffset;
+          newItem->SetEndOffset(iEndOffset);
           // Prevent load message from file and override offset set here
           newItem->GetMusicInfoTag()->SetLoaded();
           newItem->GetMusicInfoTag()->SetTitle(strInfo);
           if (iEndOffset)
             lDuration = static_cast<int>(CUtil::ConvertMilliSecsToSecsIntRounded(iEndOffset - iStartOffset));
         }
-        if (newItem->IsVideo() && !newItem->HasVideoInfoTag()) // File is a video and needs a VideoInfoTag
+        if (VIDEO::IsVideo(*newItem) &&
+            !newItem->HasVideoInfoTag()) // File is a video and needs a VideoInfoTag
           newItem->GetVideoInfoTag()->Reset(); // Force VideoInfoTag creation
-        if (lDuration && newItem->IsAudio())
+        if (lDuration && MUSIC::IsAudio(*newItem))
           newItem->GetMusicInfoTag()->SetDuration(lDuration);
         for (auto &prop : properties)
         {
@@ -210,6 +221,9 @@ void CPlayListM3U::Save(const std::string& strFileName) const
 {
   if (!m_vecItems.size())
     return;
+  bool utf8 = false;
+  if (URIUtils::GetExtension(strFileName) == ".m3u8")
+    utf8 = true;
   std::string strPlaylist = CUtil::MakeLegalPath(strFileName);
   CFile file;
   if (!file.OpenForWrite(strPlaylist,true))
@@ -225,19 +239,21 @@ void CPlayListM3U::Save(const std::string& strFileName) const
   {
     CFileItemPtr item = m_vecItems[i];
     std::string strDescription=item->GetLabel();
-    g_charsetConverter.utf8ToStringCharset(strDescription);
+    if (!utf8)
+      g_charsetConverter.utf8ToStringCharset(strDescription);
     strLine = StringUtils::Format("{}:{},{}\n", InfoMarker,
-                                  item->GetMusicInfoTag()->GetDuration() / 1000, strDescription);
+                                  item->GetMusicInfoTag()->GetDuration(), strDescription);
     if (file.Write(strLine.c_str(), strLine.size()) != static_cast<ssize_t>(strLine.size()))
       return; // error
-    if (item->m_lStartOffset != 0 || item->m_lEndOffset != 0)
+    if (item->GetStartOffset() != 0 || item->GetEndOffset() != 0)
     {
-      strLine =
-          StringUtils::Format("{}:{},{}\n", OffsetMarker, item->m_lStartOffset, item->m_lEndOffset);
+      strLine = StringUtils::Format("{}:{},{}\n", OffsetMarker, item->GetStartOffset(),
+                                    item->GetEndOffset());
       file.Write(strLine.c_str(),strLine.size());
     }
     std::string strFileName = ResolveURL(item);
-    g_charsetConverter.utf8ToStringCharset(strFileName);
+    if (!utf8)
+      g_charsetConverter.utf8ToStringCharset(strFileName);
     strLine = StringUtils::Format("{}\n", strFileName);
     if (file.Write(strLine.c_str(), strLine.size()) != static_cast<ssize_t>(strLine.size()))
       return; // error

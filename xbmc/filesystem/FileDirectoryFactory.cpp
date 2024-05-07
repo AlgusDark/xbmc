@@ -8,6 +8,8 @@
 
 #include "FileDirectoryFactory.h"
 
+#include "music/MusicFileItemClassify.h"
+
 #if defined(HAS_ISO9660PP)
 #include "ISO9660Directory.h"
 #endif
@@ -32,12 +34,14 @@
 #include "addons/AudioDecoder.h"
 #include "addons/ExtsMimeSupportList.h"
 #include "addons/VFSEntry.h"
+#include "addons/addoninfo/AddonInfo.h"
 #include "playlists/PlayListFactory.h"
 #include "playlists/SmartPlayList.h"
 #include "utils/StringUtils.h"
 #include "utils/log.h"
 
 using namespace ADDON;
+using namespace KODI;
 using namespace KODI::ADDONS;
 using namespace XFILE;
 using namespace PLAYLIST;
@@ -66,7 +70,7 @@ IFileDirectory* CFileDirectoryFactory::Create(const CURL& url, CFileItem* pItem,
   std::string strExtension = URIUtils::GetExtension(url);
   StringUtils::ToLower(strExtension);
 
-  if (!strExtension.empty() && CServiceBroker::IsBinaryAddonCacheUp())
+  if (!strExtension.empty() && CServiceBroker::IsAddonInterfaceUp())
   {
     /*!
      * Scan here about audiodecoder addons.
@@ -234,11 +238,11 @@ IFileDirectory* CFileDirectoryFactory::Create(const CURL& url, CFileItem* pItem,
     return NULL;
   }
 
-  if (pItem->IsAudioBook())
+  if (MUSIC::IsAudioBook(*pItem))
   {
-    if (!pItem->HasMusicInfoTag() || pItem->m_lEndOffset <= 0)
+    if (!pItem->HasMusicInfoTag() || pItem->GetEndOffset() <= 0)
     {
-      std::unique_ptr<CAudioBookFileDirectory> pDir(new CAudioBookFileDirectory);
+      auto pDir = std::make_unique<CAudioBookFileDirectory>();
       if (pDir->ContainsFiles(url))
         return pDir.release();
     }

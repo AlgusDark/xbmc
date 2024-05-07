@@ -5,11 +5,7 @@
 # GNUTLS_INCLUDE_DIRS - the gnutls include directory
 # GNUTLS_LIBRARIES - The gnutls libraries
 
-# Suppress PkgConfig Mismatch warning, see https://cmake.org/cmake/help/latest/module/FindPackageHandleStandardArgs.html
-set(FPHSA_NAME_MISMATCHED 1)
-include(FindPkgConfig)
-find_package(PkgConfig QUIET)
-unset(FPHSA_NAME_MISMATCHED)
+find_package(PkgConfig)
 
 if(PKG_CONFIG_FOUND)
   pkg_check_modules(GNUTLS gnutls QUIET)
@@ -25,6 +21,10 @@ find_package_handle_standard_args(GnuTLS DEFAULT_MSG GNUTLS_INCLUDE_DIRS GNUTLS_
 
 if(GNUTLS_FOUND)
   list(APPEND GNUTLS_DEFINITIONS -DHAVE_GNUTLS=1)
+else()
+  if(GNUTLS_FIND_REQUIRED)
+    message(FATAL_ERROR "GNUTLS Not Found.")
+  endif()
 endif()
 
 mark_as_advanced(GNUTLS_INCLUDE_DIRS GNUTLS_LIBRARIES GNUTLS_DEFINITIONS)

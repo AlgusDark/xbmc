@@ -8,8 +8,8 @@
 
 #include "WinEventsWayland.h"
 
-#include "AppInboundProtocol.h"
 #include "ServiceBroker.h"
+#include "application/AppInboundProtocol.h"
 #include "threads/CriticalSection.h"
 #include "threads/Thread.h"
 #include "utils/log.h"
@@ -216,7 +216,7 @@ void CWinEventsWayland::SetDisplay(wayland::display_t* display)
   if (display && !g_WlMessagePump)
   {
     // Start message processing as soon as we have a display
-    g_WlMessagePump.reset(new CWinEventsWaylandThread(*display));
+    g_WlMessagePump = std::make_unique<CWinEventsWaylandThread>(*display);
   }
   else if (g_WlMessagePump)
   {

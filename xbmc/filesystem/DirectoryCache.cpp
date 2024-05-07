@@ -10,6 +10,7 @@
 
 #include "Directory.h"
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "URL.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
@@ -24,11 +25,10 @@
 
 using namespace XFILE;
 
-CDirectoryCache::CDir::CDir(DIR_CACHE_TYPE cacheType)
+CDirectoryCache::CDir::CDir(DIR_CACHE_TYPE cacheType) : m_Items(std::make_unique<CFileItemList>())
 {
   m_cacheType = cacheType;
   m_lastAccess = 0;
-  m_Items = std::make_unique<CFileItemList>();
   m_Items->SetIgnoreURLOptions(true);
   m_Items->SetFastLookup(true);
 }
@@ -106,7 +106,7 @@ void CDirectoryCache::SetDirectory(const std::string& strPath, const CFileItemLi
   CDir dir(cacheType);
   dir.m_Items->Copy(items);
   dir.SetLastAccess(m_accessCounter);
-  m_cache.emplace(std::make_pair(storedPath, std::move(dir)));
+  m_cache.emplace(storedPath, std::move(dir));
 }
 
 void CDirectoryCache::ClearFile(const std::string& strFile)

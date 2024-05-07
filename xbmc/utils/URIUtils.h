@@ -15,6 +15,17 @@ class CURL;
 class CAdvancedSettings;
 class CFileItem;
 
+/*! \brief Defines the methodology to find hosts on a given subnet 
+    \sa IsHostOnLAN
+*/
+enum class LanCheckMode
+{
+  /*! \brief Only match if the host is on the same subnet as the kodi host */
+  ONLY_LOCAL_SUBNET,
+  /*! \brief Match the host if it belongs to any private subnet */
+  ANY_PRIVATE_SUBNET
+};
+
 class URIUtils
 {
 public:
@@ -25,6 +36,7 @@ public:
 
   static std::string GetFileName(const CURL& url);
   static std::string GetFileName(const std::string& strFileNameAndPath);
+  static std::string GetFileOrFolderName(const std::string& path);
 
   static std::string GetExtension(const CURL& url);
   static std::string GetExtension(const std::string& strFileName);
@@ -140,12 +152,16 @@ public:
   static bool IsLiveTV(const std::string& strFile);
   static bool IsPVRRecording(const std::string& strFile);
   static bool IsPVRRecordingFileOrFolder(const std::string& strFile);
+  static bool IsPVRTVRecordingFileOrFolder(const std::string& strFile);
+  static bool IsPVRRadioRecordingFileOrFolder(const std::string& strFile);
   static bool IsMultiPath(const std::string& strPath);
   static bool IsMusicDb(const std::string& strFile);
   static bool IsNfs(const std::string& strFile);
   static bool IsOnDVD(const std::string& strFile);
-  static bool IsOnLAN(const std::string& strFile);
-  static bool IsHostOnLAN(const std::string& hostName, bool offLineCheck = false);
+  static bool IsOnLAN(const std::string& strFile,
+                      LanCheckMode lanCheckMode = LanCheckMode::ONLY_LOCAL_SUBNET);
+  static bool IsHostOnLAN(const std::string& hostName,
+                          LanCheckMode lanCheckMode = LanCheckMode::ONLY_LOCAL_SUBNET);
   static bool IsPlugin(const std::string& strFile);
   static bool IsScript(const std::string& strFile);
   static bool IsRAR(const std::string& strFile);
@@ -153,12 +169,15 @@ public:
   static bool IsSmb(const std::string& strFile);
   static bool IsSpecial(const std::string& strFile);
   static bool IsStack(const std::string& strFile);
+  static bool IsFavourite(const std::string& strFile);
   static bool IsUPnP(const std::string& strFile);
   static bool IsURL(const std::string& strFile);
   static bool IsVideoDb(const std::string& strFile);
   static bool IsAPK(const std::string& strFile);
   static bool IsZIP(const std::string& strFile);
   static bool IsArchive(const std::string& strFile);
+  static bool IsDiscImage(const std::string& file);
+  static bool IsDiscImageStack(const std::string& file);
   static bool IsBluray(const std::string& strFile);
   static bool IsAndroidApp(const std::string& strFile);
   static bool IsLibraryFolder(const std::string& strFile);

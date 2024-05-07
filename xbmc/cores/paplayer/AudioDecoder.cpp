@@ -8,17 +8,22 @@
 
 #include "AudioDecoder.h"
 
-#include "Application.h"
 #include "CodecFactory.h"
 #include "FileItem.h"
+#include "ICodec.h"
 #include "ServiceBroker.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationVolumeHandling.h"
 #include "music/tags/MusicInfoTag.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
+#include "utils/URIUtils.h"
 #include "utils/log.h"
 
-#include <math.h>
+#include <cmath>
 #include <mutex>
+
+using namespace KODI;
 
 CAudioDecoder::CAudioDecoder()
 {
@@ -73,7 +78,7 @@ bool CAudioDecoder::Create(const CFileItem &file, int64_t seekOffset)
     filecache = settings->GetInt(CSettings::SETTING_CACHE_HARDDISK);
   else if ( file.IsOnDVD() )
     filecache = settings->GetInt(CSettings::SETTING_CACHEAUDIO_DVDROM);
-  else if ( file.IsOnLAN() )
+  else if (URIUtils::IsOnLAN(file.GetPath()))
     filecache = settings->GetInt(CSettings::SETTING_CACHEAUDIO_LAN);
 
   // create our codec
@@ -139,6 +144,11 @@ AEAudioFormat CAudioDecoder::GetFormat()
   if (!m_codec)
     return format;
   return m_codec->m_format;
+}
+
+unsigned int CAudioDecoder::GetChannels()
+{
+  return GetFormat().m_channelLayout.Count();
 }
 
 int64_t CAudioDecoder::Seek(int64_t time)
@@ -328,10 +338,21 @@ int CAudioDecoder::ReadSamples(int numsamples)
   return RET_SLEEP; // nothing to do
 }
 
+bool CAudioDecoder::CanSeek()
+{
+  if (m_codec)
+    return m_codec->CanSeek();
+  else
+    return false;
+}
+
 float CAudioDecoder::GetReplayGain(float &peakVal)
 {
 #define REPLAY_GAIN_DEFAULT_LEVEL 89.0f
-  const ReplayGainSettings &replayGainSettings = g_application.GetReplayGainSettings();
+  auto& components = CServiceBroker::GetAppComponents();
+  const auto appVolume = components.GetComponent<CApplicationVolumeHandling>();
+
+  const auto& replayGainSettings = appVolume->GetReplayGainSettings();
   if (replayGainSettings.iType == ReplayGain::NONE)
     return 1.0f;
 
@@ -370,7 +391,7 @@ float CAudioDecoder::GetReplayGain(float &peakVal)
     }
   }
   // convert to a gain type
-  float replaygain = pow(10.0f, (replaydB - REPLAY_GAIN_DEFAULT_LEVEL)* 0.05f);
+  float replaygain = std::pow(10.0f, (replaydB - REPLAY_GAIN_DEFAULT_LEVEL) * 0.05f);
 
   CLog::Log(LOGDEBUG,
             "AudioDecoder::GetReplayGain - Final Replaygain applied: {:f}, Track/Album Gain {:f}, "

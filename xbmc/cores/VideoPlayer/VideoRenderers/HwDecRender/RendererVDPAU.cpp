@@ -11,7 +11,6 @@
 #include "../RenderFactory.h"
 #include "ServiceBroker.h"
 #include "cores/VideoPlayer/DVDCodecs/Video/VDPAU.h"
-#include "settings/AdvancedSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "utils/GLUtils.h"
@@ -121,7 +120,7 @@ void CRendererVDPAU::ReleaseBuffer(int idx)
   CLinuxRendererGL::ReleaseBuffer(idx);
 }
 
-bool CRendererVDPAU::Supports(ERENDERFEATURE feature)
+bool CRendererVDPAU::Supports(ERENDERFEATURE feature) const
 {
   if(feature == RENDERFEATURE_BRIGHTNESS ||
      feature == RENDERFEATURE_CONTRAST)
@@ -149,7 +148,7 @@ bool CRendererVDPAU::Supports(ERENDERFEATURE feature)
   return false;
 }
 
-bool CRendererVDPAU::Supports(ESCALINGMETHOD method)
+bool CRendererVDPAU::Supports(ESCALINGMETHOD method) const
 {
   if (m_isYuv)
     return CLinuxRendererGL::Supports(method);
@@ -176,15 +175,7 @@ bool CRendererVDPAU::Supports(ESCALINGMETHOD method)
     float scaleX = fabs(((float)m_sourceWidth - m_destRect.Width())/m_sourceWidth)*100;
     float scaleY = fabs(((float)m_sourceHeight - m_destRect.Height())/m_sourceHeight)*100;
     int minScale = CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt("videoplayer.hqscalers");
-    if (scaleX < minScale && scaleY < minScale)
-      return false;
-
-    // spline36 and lanczos3 are only allowed through advancedsettings.xml
-    if(method != VS_SCALINGMETHOD_SPLINE36
-        && method != VS_SCALINGMETHOD_LANCZOS3)
-      return true;
-    else
-      return CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_videoEnableHighQualityHwScalers;
+    return !(scaleX < minScale && scaleY < minScale);
   }
 
   return false;

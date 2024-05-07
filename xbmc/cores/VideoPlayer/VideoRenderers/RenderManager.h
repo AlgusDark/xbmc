@@ -48,7 +48,7 @@ protected:
   virtual void UpdateRenderBuffers(int queued, int discard, int free) = 0;
   virtual void UpdateGuiRender(bool gui) = 0;
   virtual void UpdateVideoRender(bool video) = 0;
-  virtual CVideoSettings GetVideoSettings() = 0;
+  virtual CVideoSettings GetVideoSettings() const = 0;
 };
 
 class CRenderManager
@@ -58,8 +58,9 @@ public:
   virtual ~CRenderManager();
 
   // Functions called from render thread
-  void GetVideoRect(CRect &source, CRect &dest, CRect &view);
-  float GetAspectRatio();
+  void GetVideoRect(CRect& source, CRect& dest, CRect& view) const;
+  float GetAspectRatio() const;
+  unsigned int GetOrientation() const;
   void FrameMove();
   void FrameWait(std::chrono::milliseconds duration);
   void Render(bool clear, DWORD flags = 0, DWORD alpha = 255, bool gui = true);
@@ -89,14 +90,14 @@ public:
   bool RenderCaptureGetPixels(unsigned int captureId, unsigned int millis, uint8_t *buffer, unsigned int size);
 
   // Functions called from GUI
-  bool Supports(ERENDERFEATURE feature);
-  bool Supports(ESCALINGMETHOD method);
+  bool Supports(ERENDERFEATURE feature) const;
+  bool Supports(ESCALINGMETHOD method) const;
 
   int GetSkippedFrames()  { return m_QueueSkip; }
 
   bool Configure(const VideoPicture& picture, float fps, unsigned int orientation, int buffers = 0);
   bool AddVideoPicture(const VideoPicture& picture, volatile std::atomic_bool& bStop, EINTERLACEMETHOD deintMethod, bool wait);
-  void AddOverlay(CDVDOverlay* o, double pts);
+  void AddOverlay(std::shared_ptr<CDVDOverlay> o, double pts);
   void ShowVideo(bool enable);
 
   /**
@@ -122,7 +123,7 @@ public:
   void SetDelay(int delay) { m_videoDelay = delay; }
   int GetDelay() { return m_videoDelay; }
 
-  void SetVideoSettings(CVideoSettings settings);
+  void SetVideoSettings(const CVideoSettings& settings);
 
 protected:
 
@@ -176,7 +177,6 @@ protected:
   {
     STATE_UNCONFIGURED = 0,
     STATE_CONFIGURING,
-    STATE_RECONFIGURING,
     STATE_CONFIGURED,
   };
   ERENDERSTATE m_renderState = STATE_UNCONFIGURED;
@@ -197,7 +197,7 @@ protected:
     double         pts;
     EFIELDSYNC     presentfield;
     EPRESENTMETHOD presentmethod;
-  } m_Queue[NUM_BUFFERS];
+  } m_Queue[NUM_BUFFERS]{};
 
   std::deque<int> m_free;
   std::deque<int> m_queued;

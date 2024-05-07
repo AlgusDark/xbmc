@@ -8,24 +8,28 @@
 
 #include "Directory.h"
 
-#include "Application.h"
 #include "DirectoryCache.h"
 #include "DirectoryFactory.h"
 #include "FileDirectoryFactory.h"
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "PasswordManager.h"
 #include "ServiceBroker.h"
 #include "URL.h"
 #include "commons/Exception.h"
 #include "dialogs/GUIDialogBusy.h"
 #include "guilib/GUIWindowManager.h"
+#include "messaging/ApplicationMessenger.h"
+#include "music/MusicFileItemClassify.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "utils/Job.h"
 #include "utils/JobManager.h"
 #include "utils/URIUtils.h"
 #include "utils/log.h"
+#include "video/VideoFileItemClassify.h"
 
+using namespace KODI;
 using namespace XFILE;
 using namespace std::chrono_literals;
 
@@ -37,12 +41,12 @@ private:
 
   struct CResult
   {
-    CResult(const CURL& dir, const CURL& listDir) : m_event(true), m_dir(dir), m_listDir(listDir), m_result(false) {}
+    CResult(const CURL& dir, const CURL& listDir) : m_event(true), m_dir(dir), m_listDir(listDir) {}
     CEvent        m_event;
     CFileItemList m_list;
     CURL          m_dir;
     CURL          m_listDir;
-    bool          m_result;
+    bool m_result = false;
   };
 
   struct CGetJob
@@ -196,7 +200,8 @@ bool CDirectory::GetDirectory(const CURL& url,
         {
           // @TODO ProcessRequirements() can bring up the keyboard input dialog
           // filesystem must not depend on GUI
-          if (g_application.IsCurrentThread() && pDirectory->ProcessRequirements())
+          if (CServiceBroker::GetAppMessenger()->IsProcessThread() &&
+              pDirectory->ProcessRequirements())
           {
             authUrl.SetDomain("");
             authUrl.SetUserName("");
@@ -281,7 +286,8 @@ bool CDirectory::GetDirectory(const CURL& url,
 
     //  Should any of the files we read be treated as a directory?
     //  Disable for database folders, as they already contain the extracted items
-    if (!(hints.flags & DIR_FLAG_NO_FILE_DIRS) && !items.IsMusicDb() && !items.IsVideoDb() && !items.IsSmartPlayList())
+    if (!(hints.flags & DIR_FLAG_NO_FILE_DIRS) && !MUSIC::IsMusicDb(items) &&
+        !VIDEO::IsVideoDb(items) && !items.IsSmartPlayList())
       FilterFileDirectories(items, hints.mask);
 
     // Correct items for path substitution
@@ -302,6 +308,43 @@ bool CDirectory::GetDirectory(const CURL& url,
   catch (...) { CLog::Log(LOGERROR, "{} - Unhandled exception", __FUNCTION__); }
   CLog::Log(LOGERROR, "{} - Error getting {}", __FUNCTION__, url.GetRedacted());
   return false;
+}
+
+bool CDirectory::EnumerateDirectory(
+    const std::string& path,
+    const DirectoryEnumerationCallback& callback,
+    const DirectoryFilter& filter /* = [](const std::shared_ptr<CFileItem>&) {return true;} */,
+    bool fileOnly /* = false */,
+    const std::string& mask /* = "" */,
+    int flags /* = DIR_FLAG_DEFAULTS */)
+{
+  CFileItemList items;
+
+  // get items in specified directory
+  if (!CDirectory::GetDirectory(path, items, mask, flags))
+    return false;
+
+  // process all files
+  for (const auto& item : items)
+  {
+    if (!item->m_bIsFolder)
+      callback(item);
+  }
+
+  // process all directories
+  for (const auto& item : items)
+  {
+    if (item->m_bIsFolder && filter(item))
+    {
+      if (!fileOnly)
+        callback(item);
+
+      if (!EnumerateDirectory(item->GetPath(), callback, filter, fileOnly, mask, flags))
+        return false;
+    }
+  }
+
+  return true;
 }
 
 bool CDirectory::Create(const std::string& strPath)

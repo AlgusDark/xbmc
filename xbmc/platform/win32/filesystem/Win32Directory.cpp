@@ -9,6 +9,7 @@
 #include "Win32Directory.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "URL.h"
 #include "utils/CharsetConverter.h"
 #include "utils/SystemInfo.h"
@@ -164,10 +165,8 @@ bool CWin32Directory::RemoveRecursive(const CURL& url)
   HANDLE hSearch;
   WIN32_FIND_DATAW findData = {};
 
-  if (g_sysinfo.IsWindowsVersionAtLeast(CSysInfo::WindowsVersionWin7))
-    hSearch = FindFirstFileExW(searchMask.c_str(), FindExInfoBasic, &findData, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
-  else
-    hSearch = FindFirstFileExW(searchMask.c_str(), FindExInfoStandard, &findData, FindExSearchNameMatch, nullptr, 0);
+  hSearch = FindFirstFileExW(searchMask.c_str(), FindExInfoBasic, &findData, FindExSearchNameMatch,
+                             nullptr, FIND_FIRST_EX_LARGE_FETCH);
 
   if (hSearch == INVALID_HANDLE_VALUE)
     return GetLastError() == ERROR_FILE_NOT_FOUND ? Exists(url) : false; // return true if directory exist and empty

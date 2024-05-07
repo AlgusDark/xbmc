@@ -16,6 +16,7 @@
 #include "interfaces/AnnouncementManager.h"
 #include "interfaces/builtins/Builtins.h"
 #include "messaging/helpers/DialogHelper.h"
+#include "messaging/helpers/DialogOKHelper.h"
 #include "music/MusicLibraryQueue.h"
 #include "settings/Settings.h"
 #include "settings/dialogs/GUIDialogLibExportSettings.h"
@@ -118,7 +119,7 @@ bool CMediaSettings::Load(const TiXmlNode *settings)
     int toneMapMethod;
     if (!XMLUtils::GetInt(pElement, "tonemapmethod", toneMapMethod, VS_TONEMAPMETHOD_OFF,
                           VS_TONEMAPMETHOD_MAX))
-      toneMapMethod = VS_TONEMAPMETHOD_REINHARD;
+      toneMapMethod = VS_TONEMAPMETHOD_HABLE;
     m_defaultVideoSettings.m_ToneMapMethod = static_cast<ETONEMAPMETHOD>(toneMapMethod);
 
     if (!XMLUtils::GetFloat(pElement, "tonemapparam", m_defaultVideoSettings.m_ToneMapParam, 0.1f, 5.0f))
@@ -161,10 +162,11 @@ bool CMediaSettings::Load(const TiXmlNode *settings)
 
   // Set music playlist player repeat and shuffle from loaded settings
   if (m_musicPlaylistRepeat)
-    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_MUSIC, PLAYLIST::REPEAT_ALL);
+    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_MUSIC, PLAYLIST::RepeatState::ALL);
   else
-    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_MUSIC, PLAYLIST::REPEAT_NONE);
-  CServiceBroker::GetPlaylistPlayer().SetShuffle(PLAYLIST_MUSIC, m_musicPlaylistShuffle);
+    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_MUSIC,
+                                                  PLAYLIST::RepeatState::NONE);
+  CServiceBroker::GetPlaylistPlayer().SetShuffle(PLAYLIST::TYPE_MUSIC, m_musicPlaylistShuffle);
 
   // Read the watchmode settings for the various media views
   pElement = settings->FirstChildElement("myvideos");
@@ -192,10 +194,11 @@ bool CMediaSettings::Load(const TiXmlNode *settings)
 
   // Set video playlist player repeat and shuffle from loaded settings
   if (m_videoPlaylistRepeat)
-    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_VIDEO, PLAYLIST::REPEAT_ALL);
+    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_VIDEO, PLAYLIST::RepeatState::ALL);
   else
-    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST_VIDEO, PLAYLIST::REPEAT_NONE);
-  CServiceBroker::GetPlaylistPlayer().SetShuffle(PLAYLIST_VIDEO, m_videoPlaylistShuffle);
+    CServiceBroker::GetPlaylistPlayer().SetRepeat(PLAYLIST::TYPE_VIDEO,
+                                                  PLAYLIST::RepeatState::NONE);
+  CServiceBroker::GetPlaylistPlayer().SetShuffle(PLAYLIST::TYPE_VIDEO, m_videoPlaylistShuffle);
 
   return true;
 }
@@ -307,7 +310,9 @@ void CMediaSettings::OnSettingAction(const std::shared_ptr<const CSetting>& sett
   {
     if (HELPERS::ShowYesNoDialogText(CVariant{313}, CVariant{333}) == DialogResponse::CHOICE_YES)
     {
-      if (!CMusicLibraryQueue::GetInstance().IsRunning())
+      if (CMusicLibraryQueue::GetInstance().IsRunning())
+        HELPERS::ShowOKDialogText(CVariant{700}, CVariant{703});
+      else
         CMusicLibraryQueue::GetInstance().CleanLibrary(true);
     }
   }
@@ -338,8 +343,8 @@ void CMediaSettings::OnSettingAction(const std::shared_ptr<const CSetting>& sett
   {
     if (HELPERS::ShowYesNoDialogText(CVariant{313}, CVariant{333}) == DialogResponse::CHOICE_YES)
     {
-      if (!CVideoLibraryQueue::GetInstance().IsRunning())
-        CVideoLibraryQueue::GetInstance().CleanLibraryModal();
+      if (!CVideoLibraryQueue::GetInstance().CleanLibraryModal())
+        HELPERS::ShowOKDialogText(CVariant{700}, CVariant{703});
     }
   }
   else if (settingId == CSettings::SETTING_VIDEOLIBRARY_EXPORT)

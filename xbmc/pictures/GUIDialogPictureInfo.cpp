@@ -9,13 +9,15 @@
 #include "GUIDialogPictureInfo.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIInfoManager.h"
 #include "ServiceBroker.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
 #include "guilib/guiinfo/GUIInfoLabels.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 
 #define CONTROL_PICTURE_INFO 5
 

@@ -71,7 +71,7 @@ float RESOLUTION_INFO::DisplayRatio() const
 RESOLUTION CResolutionUtils::ChooseBestResolution(float fps, int width, int height, bool is3D)
 {
   RESOLUTION res = CServiceBroker::GetWinSystem()->GetGfxContext().GetVideoResolution();
-  float weight;
+  float weight = 0.0f;
 
   if (!FindResolutionFromOverride(fps, width, is3D, res, weight, false)) //find a refreshrate from overrides
   {
@@ -423,4 +423,52 @@ void CResolutionUtils::PrintWhitelist()
 
     CLog::Log(LOGDEBUG, "[WHITELIST] whitelisted modes:{}", modeStr);
   }
+}
+
+void CResolutionUtils::GetMaxAllowedScreenResolution(unsigned int& width, unsigned int& height)
+{
+  if (!CServiceBroker::GetWinSystem()->GetGfxContext().IsFullScreenRoot())
+    return;
+
+  std::vector<RESOLUTION_INFO> resList;
+
+  auto indexList = CServiceBroker::GetSettingsComponent()->GetSettings()->GetList(
+      CSettings::SETTING_VIDEOSCREEN_WHITELIST);
+
+  unsigned int maxWidth{0};
+  unsigned int maxHeight{0};
+
+  if (!indexList.empty())
+  {
+    for (const auto& mode : indexList)
+    {
+      RESOLUTION res = CDisplaySettings::GetInstance().GetResFromString(mode.asString());
+      RESOLUTION_INFO resInfo{CServiceBroker::GetWinSystem()->GetGfxContext().GetResInfo(res)};
+      if (static_cast<unsigned int>(resInfo.iScreenWidth) > maxWidth &&
+          static_cast<unsigned int>(resInfo.iScreenHeight) > maxHeight)
+      {
+        maxWidth = static_cast<unsigned int>(resInfo.iScreenWidth);
+        maxHeight = static_cast<unsigned int>(resInfo.iScreenHeight);
+      }
+    }
+  }
+  else
+  {
+    std::vector<RESOLUTION> resList;
+    CServiceBroker::GetWinSystem()->GetGfxContext().GetAllowedResolutions(resList);
+
+    for (const auto& res : resList)
+    {
+      RESOLUTION_INFO resInfo{CServiceBroker::GetWinSystem()->GetGfxContext().GetResInfo(res)};
+      if (static_cast<unsigned int>(resInfo.iScreenWidth) > maxWidth &&
+          static_cast<unsigned int>(resInfo.iScreenHeight) > maxHeight)
+      {
+        maxWidth = static_cast<unsigned int>(resInfo.iScreenWidth);
+        maxHeight = static_cast<unsigned int>(resInfo.iScreenHeight);
+      }
+    }
+  }
+
+  width = maxWidth;
+  height = maxHeight;
 }

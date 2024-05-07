@@ -12,6 +12,7 @@
 #include "pvr/epg/EpgSearchData.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,7 +47,7 @@ namespace PVR
      * @param tag The tag to check.
      * @return True if this tag matches the filter, false if not.
      */
-    bool FilterEntry(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
+    bool FilterEntry(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
 
     /*!
      * @brief remove duplicates from a list of epg tags.
@@ -101,6 +102,9 @@ namespace PVR
     int GetClientID() const { return m_iClientID; }
     void SetClientID(int iClientID);
 
+    int GetChannelGroupID() const { return m_iChannelGroupID; }
+    void SetChannelGroupID(int iChannelGroupID);
+
     int GetChannelUID() const { return m_iChannelUID; }
     void SetChannelUID(int iChannelUID);
 
@@ -129,14 +133,15 @@ namespace PVR
     void SetChanged(bool bChanged) { m_bChanged = bChanged; }
 
   private:
-    bool MatchGenre(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchDuration(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchStartAndEndTimes(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchSearchTerm(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchChannel(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchFreeToAir(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchTimers(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
-    bool MatchRecordings(const std::shared_ptr<CPVREpgInfoTag>& tag) const;
+    bool MatchGenre(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchDuration(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchStartAndEndTimes(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchSearchTerm(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchChannel(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchChannelGroup(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchFreeToAir(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchTimers(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
+    bool MatchRecordings(const std::shared_ptr<const CPVREpgInfoTag>& tag) const;
 
     bool m_bChanged = false;
 
@@ -151,10 +156,13 @@ namespace PVR
     // PVR specific filters
     bool m_bIsRadio; /*!< True to filter radio channels only, false to tv only */
     int m_iClientID = -1; /*!< The client id */
+    int m_iChannelGroupID{-1}; /*! The channel group id */
     int m_iChannelUID = -1; /*!< The channel uid */
     bool m_bFreeToAirOnly; /*!< Include free to air channels only */
     bool m_bIgnorePresentTimers; /*!< True to ignore currently present timers (future recordings), false if not */
     bool m_bIgnorePresentRecordings; /*!< True to ignore currently active recordings, false if not */
+
+    mutable std::optional<bool> m_groupIdMatches;
 
     int m_iDatabaseId = -1;
     std::string m_title;

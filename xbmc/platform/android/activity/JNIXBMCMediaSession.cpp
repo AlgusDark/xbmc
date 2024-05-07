@@ -9,11 +9,14 @@
 #include "JNIXBMCMediaSession.h"
 
 #include "AndroidKey.h"
-#include "Application.h"
 #include "CompileInfo.h"
 #include "ServiceBroker.h"
 #include "XBMCApp.h"
-#include "input/Key.h"
+#include "application/Application.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "messaging/ApplicationMessenger.h"
 
 #include <androidjni/Context.h>
@@ -100,9 +103,11 @@ void CJNIXBMCMediaSession::updateIntent(const CJNIIntent& intent)
 
 void CJNIXBMCMediaSession::OnPlayRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
   {
-    if (g_application.GetAppPlayer().IsPaused())
+    if (appPlayer->IsPaused())
       CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
                                                  static_cast<void*>(new CAction(ACTION_PAUSE)));
   }
@@ -110,9 +115,11 @@ void CJNIXBMCMediaSession::OnPlayRequested()
 
 void CJNIXBMCMediaSession::OnPauseRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
   {
-    if (!g_application.GetAppPlayer().IsPaused())
+    if (!appPlayer->IsPaused())
       CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
                                                  static_cast<void*>(new CAction(ACTION_PAUSE)));
   }
@@ -120,23 +127,29 @@ void CJNIXBMCMediaSession::OnPauseRequested()
 
 void CJNIXBMCMediaSession::OnNextRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
     CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
                                                static_cast<void*>(new CAction(ACTION_NEXT_ITEM)));
 }
 
 void CJNIXBMCMediaSession::OnPreviousRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
     CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
                                                static_cast<void*>(new CAction(ACTION_PREV_ITEM)));
 }
 
 void CJNIXBMCMediaSession::OnForwardRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
   {
-    if (!g_application.GetAppPlayer().IsPaused())
+    if (!appPlayer->IsPaused())
       CServiceBroker::GetAppMessenger()->PostMsg(
           TMSG_GUI_ACTION, WINDOW_INVALID, -1,
           static_cast<void*>(new CAction(ACTION_PLAYER_FORWARD)));
@@ -145,9 +158,11 @@ void CJNIXBMCMediaSession::OnForwardRequested()
 
 void CJNIXBMCMediaSession::OnRewindRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
   {
-    if (!g_application.GetAppPlayer().IsPaused())
+    if (!appPlayer->IsPaused())
       CServiceBroker::GetAppMessenger()->PostMsg(
           TMSG_GUI_ACTION, WINDOW_INVALID, -1,
           static_cast<void*>(new CAction(ACTION_PLAYER_REWIND)));
@@ -156,7 +171,9 @@ void CJNIXBMCMediaSession::OnRewindRequested()
 
 void CJNIXBMCMediaSession::OnStopRequested()
 {
-  if (g_application.GetAppPlayer().IsPlaying())
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlaying())
     CServiceBroker::GetAppMessenger()->PostMsg(TMSG_GUI_ACTION, WINDOW_INVALID, -1,
                                                static_cast<void*>(new CAction(ACTION_STOP)));
 }

@@ -20,17 +20,14 @@
 
 #include "VideoPlayerRadioRDS.h"
 
-#include "Application.h"
-#include "DVDCodecs/DVDCodecs.h"
-#include "DVDCodecs/Video/DVDVideoCodecFFmpeg.h"
-#include "DVDDemuxers/DVDDemuxUtils.h"
-#include "DVDDemuxers/DVDFactoryDemuxer.h"
-#include "DVDInputStreams/DVDInputStream.h"
 #include "DVDStreamInfo.h"
 #include "GUIInfoManager.h"
 #include "GUIUserMessages.h"
+#include "Interface/DemuxPacket.h"
 #include "ServiceBroker.h"
-#include "cores/FFmpeg.h"
+#include "application/Application.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationVolumeHandling.h"
 #include "cores/VideoPlayer/Interface/TimingConstants.h"
 #include "dialogs/GUIDialogKaiToast.h"
 #include "guilib/GUIComponent.h"
@@ -38,7 +35,6 @@
 #include "guilib/LocalizeStrings.h"
 #include "interfaces/AnnouncementManager.h"
 #include "music/tags/MusicInfoTag.h"
-#include "pictures/Picture.h"
 #include "pvr/channels/PVRChannel.h"
 #include "pvr/channels/PVRRadioRDSInfoTag.h"
 #include "settings/Settings.h"
@@ -52,6 +48,8 @@
 using namespace XFILE;
 using namespace PVR;
 using namespace KODI::MESSAGING;
+
+using namespace std::chrono_literals;
 
 /**
  * Universal Encoder Communication Protocol (UECP)
@@ -572,14 +570,6 @@ void CDVDRadioRDSData::ResetRDSCache()
 
   m_EPP_TM_INFO_ExtendedCountryCode = 0;
 
-  m_PS_Present = false;
-  m_PS_Index = 0;
-  for (auto& text : m_PS_Text)
-  {
-    memset(text, 0x20, 8);
-    text[8] = 0;
-  }
-
   m_DI_IsStereo = true;
   m_DI_ArtificialHead = false;
   m_DI_Compressed = false;
@@ -595,16 +585,9 @@ void CDVDRadioRDSData::ResetRDSCache()
   m_PTYN[8] = 0;
   m_PTYN_Present = false;
 
-  m_RT_Present = false;
-  m_RT_MaxSize = 4;
   m_RT_NewItem = false;
-  m_RT_Index = 0;
-  for (int i = 0; i < 5; ++i)
-    memset(m_RT_Text[i], 0, RT_MEL);
-  m_RT.clear();
 
   m_RTPlus_TToggle = false;
-  m_RTPlus_Present = false;
   m_RTPlus_Show = false;
   m_RTPlus_iToggle = 0;
   m_RTPlus_ItemToggle = 1;
@@ -631,7 +614,7 @@ void CDVDRadioRDSData::Process()
   {
     std::shared_ptr<CDVDMsg> pMsg;
     int iPriority = (m_speed == DVD_PLAYSPEED_PAUSE) ? 1 : 0;
-    MsgQueueReturnCode ret = m_messageQueue.Get(pMsg, 2000, iPriority);
+    MsgQueueReturnCode ret = m_messageQueue.Get(pMsg, 2s, iPriority);
 
     if (ret == MSGQ_TIMEOUT)
     {
@@ -641,7 +624,9 @@ void CDVDRadioRDSData::Process()
 
     if (MSGQ_IS_ERROR(ret))
     {
-      CLog::Log(LOGERROR, "Got MSGQ_ABORT or MSGO_IS_ERROR return true ({})", ret);
+      if (!m_messageQueue.ReceivedAbortRequest())
+        CLog::Log(LOGERROR, "MSGQ_IS_ERROR returned true ({})", ret);
+
       break;
     }
 
@@ -679,48 +664,6 @@ void CDVDRadioRDSData::Flush()
 void CDVDRadioRDSData::OnExit()
 {
   CLog::Log(LOGINFO, "Radio UECP (RDS) Processor - thread end");
-}
-
-std::string CDVDRadioRDSData::GetRadioText(unsigned int line)
-{
-  std::string str = "";
-
-  if (m_RT_Present)
-  {
-    if (line > MAX_RADIOTEXT_LISTSIZE)
-      return "";
-
-    if ((int)line+1 > m_RT_MaxSize)
-    {
-      m_RT_MaxSize = line+1;
-      return "";
-    }
-    if (m_RT.size() <= line)
-      return "";
-
-    return m_RT[line];
-  }
-  else if (m_PS_Present)
-  {
-    std::string temp = "";
-    int ind = (m_PS_Index == 0) ? 11 : m_PS_Index - 1;
-    for (int i = ind+1; i < PS_TEXT_ENTRIES; ++i)
-    {
-      temp += m_PS_Text[i];
-      temp += ' ';
-    }
-    for (int i = 0; i <= ind; ++i)
-    {
-      temp += m_PS_Text[i];
-      temp += ' ';
-    }
-
-    if (line == 0)
-      str.insert(0, temp, 6*9, 6*9);
-    else if (line == 1)
-      str.insert(0, temp.c_str(), 6*9);
-  }
-  return str;
 }
 
 void CDVDRadioRDSData::SetRadioStyle(const std::string& genre)
@@ -878,17 +821,17 @@ unsigned int CDVDRadioRDSData::DecodePS(uint8_t *msgElement)
 {
   uint8_t *text = msgElement+3;
 
+  char decodedText[9] = {};
   for (int i = 0; i < 8; ++i)
   {
     if (text[i] <= 0xfe)
-      m_PS_Text[m_PS_Index][i] = (text[i] >= 0x80) ? sRDSAddChar[text[i]-0x80] : text[i]; //!< additional rds-character, see RBDS-Standard, Annex E
+      decodedText[i] = (text[i] >= 0x80)
+                           ? sRDSAddChar[text[i] - 0x80]
+                           : text[i]; //!< additional rds-character, see RBDS-Standard, Annex E
   }
 
-  ++m_PS_Index;
-  if (m_PS_Index >= PS_TEXT_ENTRIES)
-    m_PS_Index = 0;
+  m_currentInfoTag->SetProgramServiceText(decodedText);
 
-  m_PS_Present = true;
   return 11;
 }
 
@@ -943,10 +886,12 @@ unsigned int CDVDRadioRDSData::DecodeTA_TP(const uint8_t* msgElement)
   {
     CGUIDialogKaiToast::QueueNotification(CGUIDialogKaiToast::Warning, g_localizeStrings.Get(19021), g_localizeStrings.Get(29930));
     m_TA_TP_TrafficAdvisory = true;
-    m_TA_TP_TrafficVolume = g_application.GetVolumePercent();
+    auto& components = CServiceBroker::GetAppComponents();
+    const auto appVolume = components.GetComponent<CApplicationVolumeHandling>();
+    m_TA_TP_TrafficVolume = appVolume->GetVolumePercent();
     float trafAdvVol = (float)CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt("pvrplayback.trafficadvisoryvolume");
     if (trafAdvVol)
-      g_application.SetVolume(m_TA_TP_TrafficVolume+trafAdvVol);
+      appVolume->SetVolume(m_TA_TP_TrafficVolume + trafAdvVol);
 
     CVariant data(CVariant::VariantTypeObject);
     data["on"] = true;
@@ -956,7 +901,9 @@ unsigned int CDVDRadioRDSData::DecodeTA_TP(const uint8_t* msgElement)
   if (!traffic_announcement && m_TA_TP_TrafficAdvisory && CServiceBroker::GetSettingsComponent()->GetSettings()->GetBool("pvrplayback.trafficadvisory"))
   {
     m_TA_TP_TrafficAdvisory = false;
-    g_application.SetVolume(m_TA_TP_TrafficVolume);
+    auto& components = CServiceBroker::GetAppComponents();
+    const auto appVolume = components.GetComponent<CApplicationVolumeHandling>();
+    appVolume->SetVolume(m_TA_TP_TrafficVolume);
 
     CVariant data(CVariant::VariantTypeObject);
     data["on"] = false;
@@ -1082,11 +1029,7 @@ inline void rtrim_str(std::string &text)
 
 unsigned int CDVDRadioRDSData::DecodeRT(uint8_t *msgElement, unsigned int len)
 {
-  if (!m_RT_Present)
-  {
-    m_currentInfoTag->SetPlayingRadiotext(true);
-    m_RT_Present = true;
-  }
+  m_currentInfoTag->SetPlayingRadioText(true);
 
   int bufConf = (msgElement[UECP_ME_DATA] >> 5) & 0x03;
   unsigned int msgLength = msgElement[UECP_ME_MEL];
@@ -1100,10 +1043,7 @@ unsigned int CDVDRadioRDSData::DecodeRT(uint8_t *msgElement, unsigned int len)
   }
   else if (msgLength == 0 || (msgLength == 1 && bufConf == 0))
   {
-    m_RT.clear();
-    m_RT_Index = 0;
-    for (int i = 0; i < 5; ++i)
-      memset(m_RT_Text[i], 0, RT_MEL);
+    return msgLength + 4;
   }
   else
   {
@@ -1119,32 +1059,12 @@ unsigned int CDVDRadioRDSData::DecodeRT(uint8_t *msgElement, unsigned int len)
       if (msgElement[UECP_ME_DATA+i] <= 0xfe) // additional rds-character, see RBDS-Standard, Annex E
         temptext[ii++] = (msgElement[UECP_ME_DATA+i] >= 0x80) ? sRDSAddChar[msgElement[UECP_ME_DATA+i]-0x80] : msgElement[UECP_ME_DATA+i];
     }
+
     memcpy(m_RTPlus_WorkText, temptext, RT_MEL);
     rds_entitychar(temptext);
 
-    // check repeats
-    bool repeat = false;
-    for (int ind = 0; ind < m_RT_MaxSize; ++ind)
-    {
-      if (memcmp(m_RT_Text[ind], temptext, RT_MEL) == 0)
-        repeat = true;
-    }
-    if (!repeat)
-    {
-      memcpy(m_RT_Text[m_RT_Index], temptext, RT_MEL);
+    m_currentInfoTag->SetRadioText(temptext);
 
-      std::string rdsline = m_RT_Text[m_RT_Index];
-      rtrim_str(rdsline);
-      g_charsetConverter.unknownToUTF8(rdsline);
-      m_RT.push_front(StringUtils::Trim(rdsline));
-
-      if ((int)m_RT.size() > m_RT_MaxSize)
-        m_RT.pop_back();
-
-      ++m_RT_Index;
-      if (m_RT_Index >= m_RT_MaxSize)
-        m_RT_Index = 0;
-    }
     m_RTPlus_iToggle = 0x03;     // Bit 0/1 = Title/Artist
   }
   return msgLength+4;
@@ -1230,11 +1150,7 @@ unsigned int CDVDRadioRDSData::DecodeRTPlus(uint8_t *msgElement, unsigned int le
   if (m_RTPlus_iToggle == 0)    // RTplus tags V2.1, only if RT
     return 10;
 
-  if (!m_RTPlus_Present)
-  {
-    m_currentInfoTag->SetPlayingRadiotextPlus(true);
-    m_RTPlus_Present = true;
-  }
+  m_currentInfoTag->SetPlayingRadioTextPlus(true);
 
   if (msgElement[1] > len-2 || msgElement[1] != 8)  // byte 6 = MEL, only 8 byte for 2 tags
   {

@@ -4,7 +4,6 @@ DEPS = ../../Makefile.include Makefile LIBXML2-VERSION ../../download-files.incl
 # configuration settings
 CMAKE_OPTIONS=-DBUILD_SHARED_LIBS=OFF \
               -DLIBXML2_WITH_DEBUG=OFF \
-              -DLIBXML2_WITH_DOCB=OFF \
               -DLIBXML2_WITH_ICONV=OFF \
               -DLIBXML2_WITH_LZMA=OFF \
               -DLIBXML2_WITH_MODULES=OFF \
@@ -17,7 +16,7 @@ LIBDYLIB=$(PLATFORM)/build/$(BYPRODUCT)
 
 all: .installed-$(PLATFORM)
 
-$(PLATFORM): $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE) $(DEPS)
+$(PLATFORM): $(DEPS) | $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE)
 	rm -rf $(PLATFORM)/*; mkdir -p $(PLATFORM)
 	cd $(PLATFORM); $(ARCHIVE_TOOL) $(ARCHIVE_TOOL_FLAGS) $(TARBALLS_LOCATION)/$(ARCHIVE)
 	cd $(PLATFORM); mkdir -p build

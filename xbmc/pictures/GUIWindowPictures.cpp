@@ -8,24 +8,28 @@
 
 #include "GUIWindowPictures.h"
 
-#include "Application.h"
 #include "Autorun.h"
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIDialogPictureInfo.h"
 #include "GUIPassword.h"
 #include "GUIWindowSlideShow.h"
 #include "PictureInfoLoader.h"
-#include "PlayListPlayer.h"
 #include "ServiceBroker.h"
 #include "URL.h"
 #include "Util.h"
 #include "addons/gui/GUIDialogAddonInfo.h"
+#include "application/Application.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "dialogs/GUIDialogMediaSource.h"
 #include "dialogs/GUIDialogProgress.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
-#include "interfaces/AnnouncementManager.h"
+#include "input/actions/ActionIDs.h"
 #include "media/MediaLockState.h"
 #include "messaging/helpers/DialogOKHelper.h"
+#include "pictures/SlideShowDelegator.h"
 #include "playlists/PlayList.h"
 #include "playlists/PlayListFactory.h"
 #include "settings/MediaSourceSettings.h"
@@ -37,13 +41,15 @@
 #include "utils/Variant.h"
 #include "utils/XTimeUtils.h"
 #include "utils/log.h"
+#include "video/VideoFileItemClassify.h"
 #include "view/GUIViewState.h"
+
 #define CONTROL_BTNSORTASC          4
 #define CONTROL_LABELFILES         12
 
 using namespace XFILE;
-using namespace PLAYLIST;
 using namespace KODI::MESSAGING;
+using namespace KODI::VIDEO;
 
 using namespace std::chrono_literals;
 
@@ -64,14 +70,14 @@ void CGUIWindowPictures::OnInitWindow()
   CGUIMediaWindow::OnInitWindow();
   if (m_slideShowStarted)
   {
-    CGUIWindowSlideShow* wndw = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
+    CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
     std::string path;
-    if (wndw && wndw->GetCurrentSlide())
-      path = URIUtils::GetDirectory(wndw->GetCurrentSlide()->GetPath());
+    if (slideShow.GetCurrentSlide())
+      path = URIUtils::GetDirectory(slideShow.GetCurrentSlide()->GetPath());
     if (m_vecItems->IsPath(path))
     {
-      if (wndw && wndw->GetCurrentSlide())
-        m_viewControl.SetSelectedItem(wndw->GetCurrentSlide()->GetPath());
+      if (slideShow.GetCurrentSlide())
+        m_viewControl.SetSelectedItem(slideShow.GetCurrentSlide()->GetPath());
       SaveSelectedItemInHistory();
     }
     m_slideShowStarted = false;
@@ -291,7 +297,7 @@ bool CGUIWindowPictures::GetDirectory(const std::string &strDirectory, CFileItem
 
 bool CGUIWindowPictures::OnPlayMedia(int iItem, const std::string &player)
 {
-  if (m_vecItems->Get(iItem)->IsVideo())
+  if (IsVideo(*m_vecItems->Get(iItem)))
     return CGUIMediaWindow::OnPlayMedia(iItem);
 
   return ShowPicture(iItem, false);
@@ -303,7 +309,7 @@ bool CGUIWindowPictures::ShowPicture(int iItem, bool startSlideShow)
   CFileItemPtr pItem = m_vecItems->Get(iItem);
   std::string strPicture = pItem->GetPath();
 
-#ifdef HAS_DVD_DRIVE
+#ifdef HAS_OPTICAL_DRIVE
   if (pItem->IsDVD())
     return MEDIA_DETECT::CAutorun::PlayDiscAskResume(m_vecItems->Get(iItem)->GetPath());
 #endif
@@ -311,40 +317,39 @@ bool CGUIWindowPictures::ShowPicture(int iItem, bool startSlideShow)
   if (pItem->m_bIsShareOrDrive)
     return false;
 
-  CGUIWindowSlideShow *pSlideShow = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
-  if (!pSlideShow)
-    return false;
-  if (g_application.GetAppPlayer().IsPlayingVideo())
+  //! @todo this should be reactive, based on a given event app player should stop the playback
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlayingVideo())
     g_application.StopPlaying();
 
-  pSlideShow->Reset();
+  CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
+  slideShow.Reset();
   bool bShowVideos = CServiceBroker::GetSettingsComponent()->GetSettings()->GetBool(CSettings::SETTING_PICTURES_SHOWVIDEOS);
   for (const auto& pItem : *m_vecItems)
   {
     if (!pItem->m_bIsFolder &&
         !(URIUtils::IsRAR(pItem->GetPath()) || URIUtils::IsZIP(pItem->GetPath())) &&
-        (pItem->IsPicture() || (bShowVideos && pItem->IsVideo())))
+        (pItem->IsPicture() || (bShowVideos && IsVideo(*pItem))))
     {
-      pSlideShow->Add(pItem.get());
+      slideShow.Add(pItem.get());
     }
   }
 
-  if (pSlideShow->NumSlides() == 0)
+  if (slideShow.NumSlides() == 0)
     return false;
 
-  pSlideShow->Select(strPicture);
+  slideShow.Select(strPicture);
 
   if (startSlideShow)
-    pSlideShow->StartSlideShow();
+    slideShow.StartSlideShow();
   else
   {
-    CVariant param;
-    param["player"]["speed"] = 1;
-    param["player"]["playerid"] = PLAYLIST_PICTURE;
-    CServiceBroker::GetAnnouncementManager()->Announce(ANNOUNCEMENT::Player, "OnPlay",
-                                                       pSlideShow->GetCurrentSlide(), param);
+    slideShow.PlayPicture();
   }
 
+  //! @todo this should trigger some event that should led the window manager to activate another window
+  // look into using OnPlay announce!
   m_slideShowStarted = true;
   CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_SLIDESHOW);
 
@@ -353,29 +358,27 @@ bool CGUIWindowPictures::ShowPicture(int iItem, bool startSlideShow)
 
 void CGUIWindowPictures::OnShowPictureRecursive(const std::string& strPath)
 {
-  CGUIWindowSlideShow *pSlideShow = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
-  if (pSlideShow)
-  {
-    // stop any video
-    if (g_application.GetAppPlayer().IsPlayingVideo())
-      g_application.StopPlaying();
+  // stop any video
+  //! @todo this should be reactive, based on a given event app player should stop the playback
+  const auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer->IsPlayingVideo())
+    g_application.StopPlaying();
 
-    SortDescription sorting = m_guiState->GetSortMethod();
-    pSlideShow->AddFromPath(strPath, true,
-                            sorting.sortBy, sorting.sortOrder, sorting.sortAttributes);
-    if (pSlideShow->NumSlides())
-    {
-      m_slideShowStarted = true;
-      CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_SLIDESHOW);
-    }
+  CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
+  SortDescription sorting = m_guiState->GetSortMethod();
+  slideShow.AddFromPath(strPath, true, sorting.sortBy, sorting.sortOrder, sorting.sortAttributes);
+  //! @todo window manager should react to a given event and start the window itself!
+  if (slideShow.NumSlides())
+  {
+    m_slideShowStarted = true;
+    CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_SLIDESHOW);
   }
 }
 
 void CGUIWindowPictures::OnSlideShowRecursive(const std::string &strPicture)
 {
-  CGUIWindowSlideShow *pSlideShow = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
-  if (pSlideShow)
-  {
+
     std::string strExtensions;
     CFileItemList items;
     CGUIViewState* viewState=CGUIViewState::GetViewState(GetID(), items);
@@ -386,13 +389,13 @@ void CGUIWindowPictures::OnSlideShowRecursive(const std::string &strPicture)
     }
     m_slideShowStarted = true;
 
+    CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
     SortDescription sorting = m_guiState->GetSortMethod();
-    pSlideShow->RunSlideShow(strPicture, true,
-                             CServiceBroker::GetSettingsComponent()->GetSettings()->GetBool(CSettings::SETTING_SLIDESHOW_SHUFFLE),false,
-                             "", true,
-                             sorting.sortBy, sorting.sortOrder, sorting.sortAttributes,
-                             strExtensions);
-  }
+    slideShow.RunSlideShow(strPicture, true,
+                           CServiceBroker::GetSettingsComponent()->GetSettings()->GetBool(
+                               CSettings::SETTING_SLIDESHOW_SHUFFLE),
+                           false, "", true, sorting.sortBy, sorting.sortOrder,
+                           sorting.sortAttributes, strExtensions);
 }
 
 void CGUIWindowPictures::OnSlideShowRecursive()
@@ -407,25 +410,19 @@ void CGUIWindowPictures::OnSlideShow()
 
 void CGUIWindowPictures::OnSlideShow(const std::string &strPicture)
 {
-  CGUIWindowSlideShow *pSlideShow = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
-  if (pSlideShow)
+  std::string strExtensions;
+  CFileItemList items;
+  CGUIViewState* viewState = CGUIViewState::GetViewState(GetID(), items);
+  if (viewState)
   {
-    std::string strExtensions;
-    CFileItemList items;
-    CGUIViewState* viewState=CGUIViewState::GetViewState(GetID(), items);
-    if (viewState)
-    {
-      strExtensions = viewState->GetExtensions();
-      delete viewState;
-    }
-    m_slideShowStarted = true;
-
-    SortDescription sorting = m_guiState->GetSortMethod();
-    pSlideShow->RunSlideShow(strPicture, false ,false, false,
-                             "", true,
-                             sorting.sortBy, sorting.sortOrder, sorting.sortAttributes,
-                             strExtensions);
+    strExtensions = viewState->GetExtensions();
+    delete viewState;
   }
+  CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
+  m_slideShowStarted = true;
+  SortDescription sorting = m_guiState->GetSortMethod();
+  slideShow.RunSlideShow(strPicture, false, false, false, "", true, sorting.sortBy,
+                         sorting.sortOrder, sorting.sortAttributes, strExtensions);
 }
 
 void CGUIWindowPictures::OnRegenerateThumbs()
@@ -532,7 +529,7 @@ void CGUIWindowPictures::LoadPlayList(const std::string& strPlayList)
   CLog::Log(LOGDEBUG,
             "CGUIWindowPictures::LoadPlayList()... converting playlist into slideshow: {}",
             strPlayList);
-  std::unique_ptr<CPlayList> pPlayList (CPlayListFactory::Create(strPlayList));
+  std::unique_ptr<PLAYLIST::CPlayList> pPlayList(PLAYLIST::CPlayListFactory::Create(strPlayList));
   if (nullptr != pPlayList)
   {
     if (!pPlayList->Load(strPlayList))
@@ -542,29 +539,33 @@ void CGUIWindowPictures::LoadPlayList(const std::string& strPlayList)
     }
   }
 
-  CPlayList playlist = *pPlayList;
+  PLAYLIST::CPlayList playlist = *pPlayList;
   if (playlist.size() > 0)
   {
-    // set up slideshow
-    CGUIWindowSlideShow *pSlideShow = CServiceBroker::GetGUI()->GetWindowManager().GetWindow<CGUIWindowSlideShow>(WINDOW_SLIDESHOW);
-    if (!pSlideShow)
-      return;
-    if (g_application.GetAppPlayer().IsPlayingVideo())
+    //! @todo this should be reactive, based on a given event app player should stop the playback
+    const auto& components = CServiceBroker::GetAppComponents();
+    const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+    if (appPlayer->IsPlayingVideo())
       g_application.StopPlaying();
 
+    CSlideShowDelegator& slideShow = CServiceBroker::GetSlideShowDelegator();
     // convert playlist items into slideshow items
-    pSlideShow->Reset();
+    slideShow.Reset();
     for (int i = 0; i < playlist.size(); ++i)
     {
       CFileItemPtr pItem = playlist[i];
       //CLog::Log(LOGDEBUG,"-- playlist item: {}", pItem->GetPath());
       if (pItem->IsPicture() && !(pItem->IsZIP() || pItem->IsRAR() || pItem->IsCBZ() || pItem->IsCBR()))
-        pSlideShow->Add(pItem.get());
+      {
+        slideShow.Add(pItem.get());
+      }
     }
 
     // start slideshow if there are items
-    pSlideShow->StartSlideShow();
-    if (pSlideShow->NumSlides())
+    slideShow.StartSlideShow();
+    //! @todo this should be reactive based on a triggered event the window manager is the only component
+    // that should be responsible to activate the slideshow window
+    if (slideShow.NumSlides())
       CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_SLIDESHOW);
   }
 }

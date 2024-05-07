@@ -9,6 +9,7 @@
 #include "GUIWindowPVRTimers.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "pvr/timers/PVRTimersPath.h"
 #include "utils/URIUtils.h"
 
@@ -17,6 +18,11 @@ using namespace PVR;
 CGUIWindowPVRTVTimers::CGUIWindowPVRTVTimers()
 : CGUIWindowPVRTimersBase(false, WINDOW_TV_TIMERS, "MyPVRTimers.xml")
 {
+}
+
+std::string CGUIWindowPVRTVTimers::GetRootPath() const
+{
+  return CPVRTimersPath::PATH_TV_TIMERS;
 }
 
 std::string CGUIWindowPVRTVTimers::GetDirectoryPath()
@@ -28,6 +34,11 @@ std::string CGUIWindowPVRTVTimers::GetDirectoryPath()
 CGUIWindowPVRRadioTimers::CGUIWindowPVRRadioTimers()
 : CGUIWindowPVRTimersBase(true, WINDOW_RADIO_TIMERS, "MyPVRTimers.xml")
 {
+}
+
+std::string CGUIWindowPVRRadioTimers::GetRootPath() const
+{
+  return CPVRTimersPath::PATH_RADIO_TIMERS;
 }
 
 std::string CGUIWindowPVRRadioTimers::GetDirectoryPath()

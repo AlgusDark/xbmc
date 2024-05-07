@@ -62,7 +62,6 @@ namespace PVR
     bool Update(const std::string& strDirectory, bool updateFilterPath = true) override;
     void UpdateButtons() override;
     bool OnAction(const CAction& action) override;
-    bool OnBack(int actionID) override;
     void SetInvalid() override;
     bool CanBeActivated() const override;
 
@@ -113,9 +112,6 @@ namespace PVR
 
     virtual void UpdateSelectedItemPath();
 
-    void RegisterObservers();
-    void UnregisterObservers();
-
     CCriticalSection m_critSection;
     std::string m_channelGroupPath;
     bool m_bRadio;
@@ -137,6 +133,7 @@ namespace PVR
     std::unique_ptr<CGUIPVRChannelGroupsSelector> m_channelGroupsSelector;
     std::shared_ptr<CPVRChannelGroup> m_channelGroup;
     XbmcThreads::EndTime<> m_refreshTimeout;
-    CGUIDialogProgressBarHandle* m_progressHandle; /*!< progress dialog that is displayed while the pvr manager is loading */
+    CGUIDialogProgressBarHandle* m_progressHandle =
+        nullptr; /*!< progress dialog that is displayed while the pvr manager is loading */
   };
 }

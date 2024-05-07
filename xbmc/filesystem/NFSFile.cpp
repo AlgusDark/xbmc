@@ -15,6 +15,7 @@
 #include "ServiceBroker.h"
 #include "network/DNSNameCache.h"
 #include "settings/AdvancedSettings.h"
+#include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
@@ -31,20 +32,6 @@
 #include <sys\stat.h>
 #endif
 
-// KEEP_ALIVE_TIMEOUT is decremented every half a second
-// 360 * 0.5s == 180s == 3mins
-// so when no read was done for 3mins and files are open
-// do the nfs keep alive for the open files
-#define KEEP_ALIVE_TIMEOUT 360
-
-// 6 mins (360s) cached context timeout
-#define CONTEXT_TIMEOUT 360000
-
-// return codes for getContextForExport
-#define CONTEXT_INVALID 0 // getcontext failed
-#define CONTEXT_NEW 1 // new context created
-#define CONTEXT_CACHED 2 // context cached and therefore already mounted (no new mount needed)
-
 #if defined(TARGET_WINDOWS)
 #define S_IRGRP 0
 #define S_IROTH 0
@@ -54,8 +41,30 @@
 
 using namespace XFILE;
 
+using namespace std::chrono_literals;
+
+namespace
+{
+// Default "lease_time" on most Linux NFSv4 servers are 90s.
+// See: https://linux-nfs.org/wiki/index.php/NFS_lock_recovery_notes
+// Keep alive interval should be always less than lease_time to avoid client session expires
+
+constexpr auto CONTEXT_TIMEOUT = 60s; // 2/3 parts of lease_time
+constexpr auto KEEP_ALIVE_TIMEOUT = 45s; // half of lease_time
+constexpr auto IDLE_TIMEOUT = 30s; // close fast unused contexts when no active connections
+
+constexpr int NFS4ERR_EXPIRED = -11; // client session expired due idle time greater than lease_time
+
+constexpr auto SETTING_NFS_VERSION = "nfs.version";
+constexpr auto SETTING_NFS_CHUNKSIZE = "nfs.chunksize";
+} // unnamed namespace
+
 CNfsConnection::CNfsConnection()
-  : m_pNfsContext(NULL), m_exportPath(""), m_hostName(""), m_resolvedHostName("")
+  : m_pNfsContext(NULL),
+    m_exportPath(""),
+    m_hostName(""),
+    m_resolvedHostName(""),
+    m_IdleTimeout(std::chrono::steady_clock::now() + IDLE_TIMEOUT)
 {
 }
 
@@ -144,7 +153,7 @@ struct nfs_context *CNfsConnection::getContextFromMap(const std::string &exportn
     auto now = std::chrono::steady_clock::now();
     auto duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second.lastAccessedTime);
-    if (duration.count() < CONTEXT_TIMEOUT || forceCacheHit)
+    if (duration < CONTEXT_TIMEOUT || forceCacheHit)
     {
       //its not timedout yet or caller wants the cached entry regardless of timeout
       //refresh access time of that
@@ -168,9 +177,9 @@ struct nfs_context *CNfsConnection::getContextFromMap(const std::string &exportn
   return pRet;
 }
 
-int CNfsConnection::getContextForExport(const std::string &exportname)
+CNfsConnection::ContextStatus CNfsConnection::getContextForExport(const std::string& exportname)
 {
-  int ret = CONTEXT_INVALID;
+  CNfsConnection::ContextStatus ret = CNfsConnection::ContextStatus::INVALID;
 
   clearMembers();
 
@@ -193,12 +202,12 @@ int CNfsConnection::getContextForExport(const std::string &exportname)
       tmp.pContext = m_pNfsContext;
       tmp.lastAccessedTime = std::chrono::steady_clock::now();
       m_openContextMap[exportname] = tmp; //add context to list of all contexts
-      ret = CONTEXT_NEW;
+      ret = CNfsConnection::ContextStatus::NEW;
     }
   }
   else
   {
-    ret = CONTEXT_CACHED;
+    ret = CNfsConnection::ContextStatus::CACHED;
     CLog::Log(LOGDEBUG,"NFS: Using cached context.");
   }
   m_lastAccessedTime = std::chrono::steady_clock::now();
@@ -211,7 +220,20 @@ bool CNfsConnection::splitUrlIntoExportAndPath(const CURL& url, std::string &exp
   //refresh exportlist if empty or hostname change
   if(m_exportList.empty() || !StringUtils::EqualsNoCase(url.GetHostName(), m_hostName))
   {
-    m_exportList = GetExportList(url);
+    const auto settingsComponent = CServiceBroker::GetSettingsComponent();
+    if (!settingsComponent)
+      return false;
+
+    const auto settings = settingsComponent->GetSettings();
+    if (!settings)
+      return false;
+
+    const int nfsVersion = settings->GetInt(SETTING_NFS_VERSION);
+
+    if (nfsVersion == 4)
+      m_exportList = {"/"};
+    else
+      m_exportList = GetExportList(url);
   }
 
   return splitUrlIntoExportAndPath(url, exportPath, relativePath, m_exportList);
@@ -279,16 +301,18 @@ bool CNfsConnection::Connect(const CURL& url, std::string &relativePath)
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastAccessedTime);
 
   if ((ret && (exportPath != m_exportPath || url.GetHostName() != m_hostName)) ||
-      duration.count() > CONTEXT_TIMEOUT)
+      duration > CONTEXT_TIMEOUT)
   {
-    int contextRet = getContextForExport(url.GetHostName() + exportPath);
+    CNfsConnection::ContextStatus contextRet = getContextForExport(url.GetHostName() + exportPath);
 
-    if(contextRet == CONTEXT_INVALID)//we need a new context because sharename or hostname has changed
+    // we need a new context because sharename or hostname has changed
+    if (contextRet == CNfsConnection::ContextStatus::INVALID)
     {
       return false;
     }
 
-    if(contextRet == CONTEXT_NEW) //new context was created - we need to mount it
+    // new context was created - we need to mount it
+    if (contextRet == CNfsConnection::ContextStatus::NEW)
     {
       //we connect to the directory of the path. This will be the "root" path of this connection then.
       //So all fileoperations are relative to this mountpoint...
@@ -306,11 +330,46 @@ bool CNfsConnection::Connect(const CURL& url, std::string &relativePath)
     }
     m_exportPath = exportPath;
     m_hostName = url.GetHostName();
-    //read chunksize only works after mount
+
+    // read chunksize only works after mount
     m_readChunkSize = nfs_get_readmax(m_pNfsContext);
     m_writeChunkSize = nfs_get_writemax(m_pNfsContext);
 
-    if(contextRet == CONTEXT_NEW)
+    const auto settings = CServiceBroker::GetSettingsComponent()->GetSettings();
+    const uint64_t chunkSize =
+        settings ? (settings->GetInt(SETTING_NFS_CHUNKSIZE) * 1024) : (128 * 1024);
+
+    if (m_readChunkSize == 0)
+    {
+      CLog::Log(LOGDEBUG, "NFS Server did not return max read chunksize - Using setting value {}",
+                chunkSize);
+      m_readChunkSize = chunkSize;
+    }
+    else if (chunkSize < m_readChunkSize)
+    {
+      CLog::Log(LOGDEBUG,
+                "NFS Server max read chunksize ({}) is bigger than client setting - Using client "
+                "value {}",
+                m_readChunkSize, chunkSize);
+      m_readChunkSize = chunkSize;
+    }
+
+    if (m_writeChunkSize == 0)
+    {
+      CLog::Log(LOGDEBUG, "NFS Server did not return max write chunksize - Using setting value {}",
+                chunkSize);
+      m_writeChunkSize = chunkSize;
+    }
+    else if (chunkSize < m_writeChunkSize)
+    {
+      CLog::Log(LOGDEBUG,
+                "NFS Server max write chunksize ({}) is bigger than client setting - Using client "
+                "value {}",
+                m_writeChunkSize, chunkSize);
+      m_writeChunkSize = chunkSize;
+    }
+
+    if (contextRet == CNfsConnection::ContextStatus::NEW)
     {
       CLog::Log(LOGDEBUG, "NFS: chunks: r/w {}/{}", (int)m_readChunkSize, (int)m_writeChunkSize);
     }
@@ -340,11 +399,9 @@ void CNfsConnection::CheckIfIdle()
     std::unique_lock<CCriticalSection> lock(*this);
     if (m_OpenConnections == 0 /* check again - when locked */)
     {
-      if (m_IdleTimeout > 0)
-      {
-        m_IdleTimeout--;
-      }
-      else
+      const auto now = std::chrono::steady_clock::now();
+
+      if (m_IdleTimeout < now)
       {
         CLog::Log(LOGINFO, "NFS is idle. Closing the remaining connections.");
         gNfsConnection.Deinit();
@@ -355,14 +412,13 @@ void CNfsConnection::CheckIfIdle()
   if( m_pNfsContext != NULL )
   {
     std::unique_lock<CCriticalSection> lock(keepAliveLock);
+
+    const auto now = std::chrono::steady_clock::now();
+
     //handle keep alive on opened files
     for (auto& it : m_KeepAliveTimeouts)
     {
-      if (it.second.refreshCounter > 0)
-      {
-        it.second.refreshCounter--;
-      }
-      else
+      if (it.second.refreshTime < now)
       {
         keepAlive(it.second.exportPath, it.first);
         //reset timeout
@@ -395,7 +451,7 @@ void CNfsConnection::resetKeepAlive(const std::string& _exportPath, struct nfsfh
 
   //adds new keys - refreshes existing ones
   m_KeepAliveTimeouts[_pFileHandle].exportPath = _exportPath;
-  m_KeepAliveTimeouts[_pFileHandle].refreshCounter = KEEP_ALIVE_TIMEOUT;
+  m_KeepAliveTimeouts[_pFileHandle].refreshTime = m_lastAccessedTime + KEEP_ALIVE_TIMEOUT;
 }
 
 //keep alive the filehandles nfs connection
@@ -414,14 +470,24 @@ void CNfsConnection::keepAlive(const std::string& _exportPath, struct nfsfh* _pF
   if (!pContext)// this should normally never happen - paranoia
     pContext = m_pNfsContext;
 
-  CLog::Log(LOGINFO, "NFS: sending keep alive after {} s.", KEEP_ALIVE_TIMEOUT / 2);
+  CLog::LogF(LOGDEBUG, "sending keep alive after {}s.",
+             std::chrono::duration_cast<std::chrono::seconds>(KEEP_ALIVE_TIMEOUT).count());
+
   std::unique_lock<CCriticalSection> lock(*this);
+
   nfs_lseek(pContext, _pFileHandle, 0, SEEK_CUR, &offset);
-  nfs_read(pContext, _pFileHandle, 32, buffer);
+
+  int bytes = nfs_read(pContext, _pFileHandle, 32, buffer);
+  if (bytes < 0)
+  {
+    CLog::LogF(LOGERROR, "nfs_read - Error ({}, {})", bytes, nfs_get_error(pContext));
+    return;
+  }
+
   nfs_lseek(pContext, _pFileHandle, offset, SEEK_SET, &offset);
 }
 
-int CNfsConnection::stat(const CURL &url, NFSSTAT *statbuff)
+int CNfsConnection::stat(const CURL& url, nfs_stat_64* statbuff)
 {
   std::unique_lock<CCriticalSection> lock(*this);
   int nfsRet = 0;
@@ -444,7 +510,7 @@ int CNfsConnection::stat(const CURL &url, NFSSTAT *statbuff)
 
       if(nfsRet == 0)
       {
-        nfsRet = nfs_stat(pTmpContext, relativePath.c_str(), statbuff);
+        nfsRet = nfs_stat64(pTmpContext, relativePath.c_str(), statbuff);
       }
       else
       {
@@ -474,18 +540,43 @@ void CNfsConnection::AddIdleConnection()
   m_OpenConnections--;
   /* If we close a file we reset the idle timer so that we don't have any weird behaviours if a user
    leaves the movie paused for a long while and then press stop */
-  m_IdleTimeout = 180;
+  const auto now = std::chrono::steady_clock::now();
+  m_IdleTimeout = now + IDLE_TIMEOUT;
 }
 
 
 void CNfsConnection::setOptions(struct nfs_context* context)
 {
+  const auto settingsComponent = CServiceBroker::GetSettingsComponent();
+  if (!settingsComponent)
+    return;
+
+  const auto advancedSettings = settingsComponent->GetAdvancedSettings();
+  if (!advancedSettings)
+    return;
+
 #ifdef HAS_NFS_SET_TIMEOUT
-  uint32_t timeout = CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_nfsTimeout;
+  uint32_t timeout = advancedSettings->m_nfsTimeout;
   nfs_set_timeout(context, timeout > 0 ? timeout * 1000 : -1);
 #endif
-  int retries = CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_nfsRetries;
+  int retries = advancedSettings->m_nfsRetries;
   nfs_set_autoreconnect(context, retries);
+
+  const auto settings = settingsComponent->GetSettings();
+  if (!settings)
+    return;
+
+  const int nfsVersion = settings->GetInt(SETTING_NFS_VERSION);
+
+  int ret = nfs_set_version(context, nfsVersion);
+  if (ret != 0)
+  {
+    CLog::Log(LOGERROR, "NFS: Failed to set nfs version: {} ({})", nfsVersion,
+              nfs_get_error(context));
+    return;
+  }
+
+  CLog::Log(LOGDEBUG, "NFS: version: {}", nfsVersion);
 }
 
 CNfsConnection gNfsConnection;
@@ -528,7 +619,6 @@ int64_t CNFSFile::GetLength()
 
 bool CNFSFile::Open(const CURL& url)
 {
-  int ret = 0;
   Close();
   // we can't open files like nfs://file.f or nfs://server/file.f
   // if a file matches the if below return false, it can't exist on a nfs share.
@@ -542,19 +632,32 @@ bool CNFSFile::Open(const CURL& url)
 
   std::unique_lock<CCriticalSection> lock(gNfsConnection);
 
-  if(!gNfsConnection.Connect(url, filename))
+  if (!gNfsConnection.Connect(url, filename))
     return false;
 
   m_pNfsContext = gNfsConnection.GetNfsContext();
   m_exportPath = gNfsConnection.GetContextMapId();
 
-  ret = nfs_open(m_pNfsContext, filename.c_str(), O_RDONLY, &m_pFileHandle);
+  int ret = nfs_open(m_pNfsContext, filename.c_str(), O_RDONLY, &m_pFileHandle);
+
+  if (ret == NFS4ERR_EXPIRED) // client session expired due no activity/keep alive
+  {
+    CLog::Log(LOGERROR,
+              "CNFSFile::Open: Unable to open file - trying again with a new context: error: '{}'",
+              nfs_get_error(m_pNfsContext));
+
+    gNfsConnection.Deinit();
+    m_pNfsContext = gNfsConnection.GetNfsContext();
+    m_exportPath = gNfsConnection.GetContextMapId();
+    ret = nfs_open(m_pNfsContext, filename.c_str(), O_RDONLY, &m_pFileHandle);
+  }
 
   if (ret != 0)
   {
-    CLog::Log(LOGINFO, "CNFSFile::Open: Unable to open file : '{}'  error : '{}'",
-              url.GetFileName(), nfs_get_error(m_pNfsContext));
-    m_pNfsContext = NULL;
+    CLog::Log(LOGERROR, "CNFSFile::Open: Unable to open file: '{}' error: '{}'", url.GetFileName(),
+              nfs_get_error(m_pNfsContext));
+
+    m_pNfsContext = nullptr;
     m_exportPath.clear();
     return false;
   }
@@ -576,7 +679,6 @@ bool CNFSFile::Open(const CURL& url)
   return true;
 }
 
-
 bool CNFSFile::Exists(const CURL& url)
 {
   return Stat(url,NULL) == 0;
@@ -597,10 +699,9 @@ int CNFSFile::Stat(const CURL& url, struct __stat64* buffer)
   if(!gNfsConnection.Connect(url,filename))
     return -1;
 
+  nfs_stat_64 tmpBuffer = {};
 
-  NFSSTAT tmpBuffer = {};
-
-  ret = nfs_stat(gNfsConnection.GetNfsContext(), filename.c_str(), &tmpBuffer);
+  ret = nfs_stat64(gNfsConnection.GetNfsContext(), filename.c_str(), &tmpBuffer);
 
   //if buffer == NULL we where called from Exists - in that case don't spam the log with errors
   if (ret != 0 && buffer != NULL)
@@ -611,24 +712,20 @@ int CNFSFile::Stat(const CURL& url, struct __stat64* buffer)
   }
   else
   {
-    if(buffer)
+    if (buffer)
     {
-#if defined(TARGET_WINDOWS) //! @todo get rid of this define after gotham v13
-      memcpy(buffer, &tmpBuffer, sizeof(struct __stat64));
-#else
-      memset(buffer, 0, sizeof(struct __stat64));
-      buffer->st_dev = tmpBuffer.st_dev;
-      buffer->st_ino = tmpBuffer.st_ino;
-      buffer->st_mode = tmpBuffer.st_mode;
-      buffer->st_nlink = tmpBuffer.st_nlink;
-      buffer->st_uid = tmpBuffer.st_uid;
-      buffer->st_gid = tmpBuffer.st_gid;
-      buffer->st_rdev = tmpBuffer.st_rdev;
-      buffer->st_size = tmpBuffer.st_size;
-      buffer->st_atime = tmpBuffer.st_atime;
-      buffer->st_mtime = tmpBuffer.st_mtime;
-      buffer->st_ctime = tmpBuffer.st_ctime;
-#endif
+      *buffer = {};
+      buffer->st_dev = tmpBuffer.nfs_dev;
+      buffer->st_ino = tmpBuffer.nfs_ino;
+      buffer->st_mode = tmpBuffer.nfs_mode;
+      buffer->st_nlink = tmpBuffer.nfs_nlink;
+      buffer->st_uid = tmpBuffer.nfs_uid;
+      buffer->st_gid = tmpBuffer.nfs_gid;
+      buffer->st_rdev = tmpBuffer.nfs_rdev;
+      buffer->st_size = tmpBuffer.nfs_size;
+      buffer->st_atime = tmpBuffer.nfs_atime;
+      buffer->st_mtime = tmpBuffer.nfs_mtime;
+      buffer->st_ctime = tmpBuffer.nfs_ctime;
     }
   }
   return ret;

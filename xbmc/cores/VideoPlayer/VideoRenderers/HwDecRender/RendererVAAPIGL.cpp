@@ -9,12 +9,11 @@
 #include "RendererVAAPIGL.h"
 
 #include "../RenderFactory.h"
-#include "cores/VideoPlayer/DVDCodecs/DVDCodecUtils.h"
 #include "cores/VideoPlayer/DVDCodecs/Video/VAAPI.h"
-#include "settings/AdvancedSettings.h"
-#include "settings/Settings.h"
 #include "utils/GLUtils.h"
 #include "utils/log.h"
+
+#include <memory>
 
 using namespace VAAPI;
 
@@ -98,11 +97,11 @@ bool CRendererVAAPIGL::Configure(const VideoPicture& picture, float fps, unsigne
     {
       if (useVaapi2)
       {
-        tex.reset(new VAAPI::CVaapi2Texture);
+        tex = std::make_unique<VAAPI::CVaapi2Texture>();
       }
       else
       {
-        tex.reset(new VAAPI::CVaapi1Texture);
+        tex = std::make_unique<VAAPI::CVaapi1Texture>();
       }
       tex->Init(interop);
     }
@@ -138,12 +137,12 @@ bool CRendererVAAPIGL::ConfigChanged(const VideoPicture& picture)
   return false;
 }
 
-bool CRendererVAAPIGL::Supports(ERENDERFEATURE feature)
+bool CRendererVAAPIGL::Supports(ERENDERFEATURE feature) const
 {
   return CLinuxRendererGL::Supports(feature);
 }
 
-bool CRendererVAAPIGL::Supports(ESCALINGMETHOD method)
+bool CRendererVAAPIGL::Supports(ESCALINGMETHOD method) const
 {
   return CLinuxRendererGL::Supports(method);
 }

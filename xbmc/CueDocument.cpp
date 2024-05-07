@@ -43,6 +43,7 @@
 #include "CueDocument.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "Util.h"
 #include "filesystem/Directory.h"
@@ -112,11 +113,7 @@ class BufferReader
   : public CueReader
 {
 public:
-  explicit BufferReader(const std::string &strContent)
-    : m_data(strContent)
-    , m_pos(0)
-  {
-  }
+  explicit BufferReader(const std::string& strContent) : m_data(strContent) {}
   bool ReadLine(std::string &line) override
   {
     // Read the next line.
@@ -145,7 +142,7 @@ public:
   }
 private:
   std::string m_data;
-  size_t m_pos;
+  size_t m_pos = 0;
 };
 
 CCueDocument::~CCueDocument() = default;

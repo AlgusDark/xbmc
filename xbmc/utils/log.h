@@ -28,7 +28,6 @@
 #include "settings/lib/ISettingsHandler.h"
 #include "settings/lib/SettingDefinitions.h"
 #include "utils/IPlatformLog.h"
-#include "utils/StringUtils.h"
 #include "utils/logtypes.h"
 
 #include <string>
@@ -46,6 +45,18 @@ template<typename Mutex>
 class dist_sink;
 } // namespace sinks
 } // namespace spdlog
+
+#if FMT_VERSION >= 100000
+using fmt::enums::format_as;
+
+namespace fmt
+{
+template<typename T, typename Char>
+struct formatter<std::atomic<T>, Char> : formatter<T, Char>
+{
+};
+} // namespace fmt
+#endif
 
 class CLog : public ISettingsHandler, public ISettingCallback
 {
@@ -130,7 +141,7 @@ private:
     auto message = fmt::format(format, std::forward<Args>(args)...);
 
     // fixup newline alignment, number of spaces should equal prefix length
-    StringUtils::Replace(message, "\n", "\n                                                   ");
+    FormatLineBreaks(message);
 
     m_defaultLogger->log(level, message);
   }
@@ -138,6 +149,8 @@ private:
   Logger CreateLogger(const std::string& loggerName);
 
   void SetComponentLogLevel(const std::vector<CVariant>& components);
+
+  void FormatLineBreaks(std::string& message);
 
   std::unique_ptr<IPlatformLog> m_platform;
   std::shared_ptr<spdlog::sinks::dist_sink<std::mutex>> m_sinks;
@@ -147,6 +160,6 @@ private:
 
   int m_logLevel;
 
-  bool m_componentLogEnabled;
-  uint32_t m_componentLogLevels;
+  bool m_componentLogEnabled = false;
+  uint32_t m_componentLogLevels = 0;
 };

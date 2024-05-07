@@ -15,12 +15,14 @@
 #include "ServiceBroker.h"
 #include "Util.h"
 #include "addons/AddonManager.h"
+#include "addons/addoninfo/AddonType.h"
 #include "dialogs/GUIDialogExtendedProgressBar.h"
 #include "filesystem/File.h"
 #include "filesystem/SpecialProtocol.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
+#include "network/NetworkFileItemClassify.h"
 #include "settings/AdvancedSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
@@ -36,6 +38,7 @@
 using namespace ADDON;
 using namespace MUSIC_INFO;
 using namespace XFILE;
+using namespace KODI;
 using namespace KODI::CDRIP;
 
 CCDDARipJob::CCDDARipJob(const std::string& input,
@@ -65,7 +68,7 @@ bool CCDDARipJob::DoWork()
 
   // if we are ripping to a samba share, rip it to hd first and then copy it to the share
   CFileItem file(m_output, false);
-  if (file.IsRemote())
+  if (NETWORK::IsRemote(file))
     m_output = SetupTempFile();
 
   if (m_output.empty())
@@ -97,8 +100,8 @@ bool CCDDARipJob::DoWork()
   // start ripping
   int percent = 0;
   int oldpercent = 0;
-  bool cancelled(false);
-  int result;
+  bool cancelled{false};
+  int result{-1};
   while (!cancelled && (result = RipChunk(reader, encoder, percent)) == 0)
   {
     cancelled = ShouldCancel(percent, 100);
@@ -114,7 +117,7 @@ bool CCDDARipJob::DoWork()
   encoder.reset();
   reader.Close();
 
-  if (file.IsRemote() && !cancelled && result == 2)
+  if (NETWORK::IsRemote(file) && !cancelled && result == 2)
   {
     // copy the ripped track to the share
     if (!CFile::Copy(m_output, file.GetPath()))
@@ -190,7 +193,7 @@ std::unique_ptr<CEncoder> CCDDARipJob::SetupEncoder(CFile& reader)
   else
   {
     const AddonInfoPtr addonInfo =
-        CServiceBroker::GetAddonMgr().GetAddonInfo(audioEncoder, ADDON_AUDIOENCODER);
+        CServiceBroker::GetAddonMgr().GetAddonInfo(audioEncoder, AddonType::AUDIOENCODER);
     if (addonInfo)
     {
       encoder = std::make_unique<CEncoderAddon>(addonInfo);

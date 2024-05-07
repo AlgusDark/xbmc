@@ -10,6 +10,7 @@
 
 #include "APKFile.h"
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "utils/CharsetConverter.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
@@ -57,7 +58,7 @@ bool CAPKDirectory::GetDirectory(const CURL& url, CFileItemList &items)
     if (dir_marker != std::string::npos)
     {
       // return items relative to path
-      test_name=test_name.substr(0, dir_marker);
+      test_name.resize(dir_marker);
 
       if (items.Contains(host + "/" + test_name))
         continue;

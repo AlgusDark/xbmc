@@ -15,28 +15,32 @@
 #include "GUIPassword.h"
 #include "GUIUserMessages.h"
 #include "ServiceBroker.h"
-#include "TextureCache.h"
+#include "TextureDatabase.h"
 #include "URL.h"
 #include "Util.h"
 #include "addons/Scraper.h"
 #include "favourites/FavouritesService.h"
-#include "filesystem/File.h"
 #include "guilib/GUIButtonControl.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIControlGroupList.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "media/MediaLockState.h"
+#include "music/MusicFileItemClassify.h"
 #include "profiles/ProfileManager.h"
 #include "profiles/dialogs/GUIDialogLockSettings.h"
 #include "settings/MediaSourceSettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "storage/MediaManager.h"
+#include "utils/FileUtils.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/Variant.h"
+
+using namespace KODI;
 
 #define BACKGROUND_IMAGE       999
 #define GROUP_LIST             996
@@ -126,17 +130,17 @@ void CGUIDialogContextMenu::SetupButtons()
   CGUIControlGroupList* pGroupList = dynamic_cast<CGUIControlGroupList *>(GetControl(GROUP_LIST));
 
   // add our buttons
-  for (unsigned int i = 0; i < m_buttons.size(); i++)
+  if (pGroupList)
   {
-    CGUIButtonControl *pButton = new CGUIButtonControl(*pButtonTemplate);
-    if (pButton)
-    { // set the button's ID and position
-      int id = BUTTON_START + i;
-      pButton->SetID(id);
-      pButton->SetVisible(true);
-      pButton->SetLabel(m_buttons[i].second);
-      if (pGroupList)
-      {
+    for (unsigned int i = 0; i < m_buttons.size(); i++)
+    {
+      CGUIButtonControl* pButton = new CGUIButtonControl(*pButtonTemplate);
+      if (pButton)
+      { // set the button's ID and position
+        int id = BUTTON_START + i;
+        pButton->SetID(id);
+        pButton->SetVisible(true);
+        pButton->SetLabel(m_buttons[i].second);
         pButton->SetPosition(pButtonTemplate->GetXPosition(), pButtonTemplate->GetYPosition());
         // try inserting context buttons at position specified by template
         // button, if template button is not in grouplist fallback to adding
@@ -220,7 +224,7 @@ void CGUIDialogContextMenu::GetContextButtons(const std::string &type, const CFi
   // Add buttons to the ContextMenu that should be visible for both sources and autosourced items
   // Optical removable drives automatically have the static Eject button added (see CEjectDisk).
   // Here we only add the eject button to HDD drives
-  if (item && item->IsRemovable() && !item->IsDVD() && !item->IsCDDA())
+  if (item && item->IsRemovable() && !item->IsDVD() && !MUSIC::IsCDDA(*item))
   {
     buttons.Add(CONTEXT_BUTTON_EJECT_DRIVE, 13420); // Remove safely
   }
@@ -384,7 +388,7 @@ bool CGUIDialogContextMenu::OnContextButton(const std::string &type, const CFile
       }
       // see if there's a local thumb for this item
       std::string folderThumb = item->GetFolderThumb();
-      if (XFILE::CFile::Exists(folderThumb))
+      if (CFileUtils::Exists(folderThumb))
       {
         CFileItemPtr local(new CFileItem("thumb://Local", false));
         local->SetArt("thumb", folderThumb);
@@ -591,7 +595,10 @@ void CGUIDialogContextMenu::OnDeinitWindow(int nextWindowID)
   {
     const CGUIControl *control = GetControl(BUTTON_START + i);
     if (control)
+    {
       RemoveControl(control);
+      delete control;
+    }
   }
 
   m_buttons.clear();

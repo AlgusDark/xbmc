@@ -17,6 +17,7 @@
 #include "settings/SettingsComponent.h"
 #include "settings/lib/Setting.h"
 #include "settings/lib/SettingsManager.h"
+#include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 
 #include <cstring>
@@ -37,9 +38,7 @@ CLog::CLog()
   : m_platform(IPlatformLog::CreatePlatformLog()),
     m_sinks(std::make_shared<spdlog::sinks::dist_sink_mt>()),
     m_defaultLogger(CreateLogger("general")),
-    m_logLevel(LOG_LEVEL_DEBUG),
-    m_componentLogEnabled(false),
-    m_componentLogLevels(0)
+    m_logLevel(LOG_LEVEL_DEBUG)
 {
   // add platform-specific debug sinks
   m_platform->AddSinks(m_sinks);
@@ -213,6 +212,7 @@ void CLog::SettingOptionsLoggingComponentsFiller(const SettingConstPtr& setting,
   list.emplace_back(g_localizeStrings.Get(685), LOGPVR);
   list.emplace_back(g_localizeStrings.Get(686), LOGEPG);
   list.emplace_back(g_localizeStrings.Get(39117), LOGANNOUNCE);
+  list.emplace_back(g_localizeStrings.Get(39124), LOGADDONS);
 #ifdef HAS_DBUS
   list.emplace_back(g_localizeStrings.Get(674), LOGDBUS);
 #endif
@@ -293,4 +293,9 @@ void CLog::SetComponentLogLevel(const std::vector<CVariant>& components)
 
     m_componentLogLevels |= static_cast<uint32_t>(component.asInteger());
   }
+}
+
+void CLog::FormatLineBreaks(std::string& message)
+{
+  StringUtils::Replace(message, "\n", "\n                                                   ");
 }

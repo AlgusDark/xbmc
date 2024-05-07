@@ -8,6 +8,8 @@
 
 #include "Filesystem.h"
 
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "Util.h"
 #include "addons/binary-addons/AddonDll.h"
 #include "filesystem/CurlFile.h"
@@ -166,7 +168,7 @@ bool Interface_Filesystem::can_open_directory(void* kodiBase, const char* url)
   }
 
   CFileItemList items;
-  return CDirectory::GetDirectory(url, items, "", DIR_FLAG_DEFAULTS);
+  return CDirectory::GetDirectory(url, items, "", DIR_FLAG_DEFAULTS | DIR_FLAG_BYPASS_CACHE);
 }
 
 bool Interface_Filesystem::create_directory(void* kodiBase, const char* path)
@@ -192,7 +194,7 @@ bool Interface_Filesystem::directory_exists(void* kodiBase, const char* path)
     return false;
   }
 
-  return CDirectory::Exists(path);
+  return CDirectory::Exists(path, false);
 }
 
 bool Interface_Filesystem::remove_directory(void* kodiBase, const char* path)
@@ -207,7 +209,7 @@ bool Interface_Filesystem::remove_directory(void* kodiBase, const char* path)
 
   // Empty directory
   CFileItemList fileItems;
-  CDirectory::GetDirectory(path, fileItems, "", DIR_FLAG_DEFAULTS);
+  CDirectory::GetDirectory(path, fileItems, "", DIR_FLAG_NO_FILE_DIRS | DIR_FLAG_BYPASS_CACHE);
   for (int i = 0; i < fileItems.Size(); ++i)
     CFile::Delete(fileItems.Get(i)->GetPath());
 
@@ -259,7 +261,8 @@ bool Interface_Filesystem::get_directory(void* kodiBase,
   }
 
   CFileItemList fileItems;
-  if (!CDirectory::GetDirectory(path, fileItems, mask, DIR_FLAG_NO_FILE_DIRS))
+  if (!CDirectory::GetDirectory(path, fileItems, mask,
+                                DIR_FLAG_NO_FILE_DIRS | DIR_FLAG_BYPASS_CACHE))
     return false;
 
   if (fileItems.Size() > 0)

@@ -24,7 +24,7 @@ public:
   static bool Register();
 
   void Update() override;
-  bool RenderCapture(CRenderCapture* capture) override;
+  bool RenderCapture(int index, CRenderCapture* capture) override;
 
   // Player functions
   bool Configure(const VideoPicture &picture, float fps, unsigned int orientation) override;
@@ -40,8 +40,8 @@ public:
 
   // Feature support
   bool SupportsMultiPassRendering() override { return false; }
-  bool Supports(ERENDERFEATURE feature) override;
-  bool Supports(ESCALINGMETHOD method) override;
+  bool Supports(ERENDERFEATURE feature) const override;
+  bool Supports(ESCALINGMETHOD method) const override;
 
   bool WantsDoublePass() override;
   bool ConfigChanged(const VideoPicture& picture) override;

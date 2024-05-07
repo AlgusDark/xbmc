@@ -11,6 +11,7 @@
 #include "IArchivable.h"
 #include "filesystem/File.h"
 #include "utils/Variant.h"
+#include "utils/XTimeUtils.h"
 #include "utils/log.h"
 
 #include <algorithm>
@@ -30,11 +31,11 @@ using namespace XFILE;
 #define MAX_STRING_SIZE 100*1024*1024
 
 CArchive::CArchive(CFile* pFile, int mode)
+  : m_pBuffer(std::unique_ptr<uint8_t[]>(new uint8_t[CARCHIVE_BUFFER_MAX]))
 {
   m_pFile = pFile;
   m_iMode = mode;
 
-  m_pBuffer = std::unique_ptr<uint8_t[]>(new uint8_t[CARCHIVE_BUFFER_MAX]);
   memset(m_pBuffer.get(), 0, CARCHIVE_BUFFER_MAX);
   if (mode == load)
   {

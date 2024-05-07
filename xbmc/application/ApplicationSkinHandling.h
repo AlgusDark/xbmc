@@ -8,28 +8,46 @@
 
 #pragma once
 
+#include "application/IApplicationComponent.h"
+
 #include <string>
 
-class CApplicationPlayer;
+class CApplication;
+class CSetting;
 class IMsgTargetCallback;
 class IWindowManagerCallback;
 
 /*!
  * \brief Class handling application support for skin management.
  */
-class CApplicationSkinHandling
+class CApplicationSkinHandling : public IApplicationComponent
 {
+  friend class CApplication;
+
 public:
-  explicit CApplicationSkinHandling(CApplicationPlayer& appPlayer);
+  CApplicationSkinHandling(IMsgTargetCallback* msgCb,
+                           IWindowManagerCallback* wCb,
+                           bool& bInitializing);
 
   void UnloadSkin();
 
-protected:
-  bool LoadSkin(const std::string& skinID, IMsgTargetCallback* msgCb, IWindowManagerCallback* wCb);
-  bool LoadCustomWindows();
-  void ReloadSkin(bool confirm, IMsgTargetCallback* msgCb, IWindowManagerCallback* wCb);
+  bool OnSettingChanged(const CSetting& setting);
+  void ReloadSkin(bool confirm = false);
 
-  CApplicationPlayer& m_appPlayer;
+protected:
+  bool LoadSkin(const std::string& skinID);
+  bool LoadCustomWindows();
+
+  /*!
+ * \brief Called by the application main/render thread for processing
+ *        operations belonging to the skin.
+ */
+  void ProcessSkin() const;
+
   bool m_saveSkinOnUnloading = true;
   bool m_confirmSkinChange = true;
+  bool m_ignoreSkinSettingChanges = false;
+  IMsgTargetCallback* m_msgCb;
+  IWindowManagerCallback* m_wCb;
+  bool& m_bInitializing;
 };

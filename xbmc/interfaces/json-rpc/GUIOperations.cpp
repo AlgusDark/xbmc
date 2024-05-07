@@ -8,16 +8,19 @@
 
 #include "GUIOperations.h"
 
-#include "Application.h"
 #include "GUIInfoManager.h"
 #include "ServiceBroker.h"
 #include "addons/AddonManager.h"
+#include "addons/IAddon.h"
+#include "addons/addoninfo/AddonType.h"
+#include "application/Application.h"
 #include "dialogs/GUIDialogKaiToast.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/StereoscopicsManager.h"
-#include "input/Key.h"
 #include "input/WindowTranslator.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "messaging/ApplicationMessenger.h"
 #include "rendering/RenderSystem.h"
 #include "settings/Settings.h"
@@ -52,7 +55,8 @@ JSONRPC_STATUS CGUIOperations::ActivateWindow(const std::string &method, ITransp
   if (iWindow != WINDOW_INVALID)
   {
     std::vector<std::string> params;
-    for (CVariant::const_iterator_array param = parameterObject["parameters"].begin_array(); param != parameterObject["parameters"].end_array(); param++)
+    for (CVariant::const_iterator_array param = parameterObject["parameters"].begin_array();
+         param != parameterObject["parameters"].end_array(); ++param)
     {
       if (param->isString() && !param->empty())
         params.push_back(param->asString());
@@ -125,6 +129,16 @@ JSONRPC_STATUS CGUIOperations::GetStereoscopicModes(const std::string &method, I
   return OK;
 }
 
+JSONRPC_STATUS CGUIOperations::ActivateScreenSaver(const std::string& method,
+                                                   ITransportLayer* transport,
+                                                   IClient* client,
+                                                   const CVariant& parameterObject,
+                                                   CVariant& result)
+{
+  CServiceBroker::GetAppMessenger()->SendMsg(TMSG_ACTIVATESCREENSAVER);
+  return ACK;
+}
+
 JSONRPC_STATUS CGUIOperations::GetPropertyValue(const std::string &property, CVariant &result)
 {
   if (property == "currentwindow")
@@ -142,7 +156,8 @@ JSONRPC_STATUS CGUIOperations::GetPropertyValue(const std::string &property, CVa
   {
     std::string skinId = CServiceBroker::GetSettingsComponent()->GetSettings()->GetString(CSettings::SETTING_LOOKANDFEEL_SKIN);
     AddonPtr addon;
-    if (!CServiceBroker::GetAddonMgr().GetAddon(skinId, addon, ADDON_SKIN, OnlyEnabled::CHOICE_YES))
+    if (!CServiceBroker::GetAddonMgr().GetAddon(skinId, addon, AddonType::SKIN,
+                                                OnlyEnabled::CHOICE_YES))
       return InternalError;
 
     result["id"] = skinId;

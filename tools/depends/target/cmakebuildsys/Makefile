@@ -14,18 +14,17 @@ ifeq ($(OS),darwin_embedded)
   # cmake toolset option buildsystem selects the legacy xcode build system
   # cmake 3.19+ with xcode 12 defaults to the new build system. Stick with the legacy
   # system for now for our building
-  CMAKE_BUILD_ARGUMENTS = -G Xcode -T buildsystem=1
+  CMAKE_BUILD_ARGUMENTS = -G Xcode
 else ifeq ($(GEN),Xcode)
+  CMAKE_BUILD_ARGUMENTS = -G Xcode
+else ifeq ($(GEN),Xcodelegacy)
   CMAKE_BUILD_ARGUMENTS = -G Xcode -T buildsystem=1
+else ifeq ($(GEN),Ninja)
+  CMAKE_BUILD_ARGUMENTS = -G "Ninja" -DCMAKE_BUILD_TYPE=$(Configuration)
 else
   CMAKE_BUILD_ARGUMENTS = -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=$(Configuration)
-endif
-
-ifeq ($(OS),osx)
-  ifeq ($(APP_WINDOW_SYSTEM),native)
-    WINDOWSYSTEM=-DAPP_WINDOW_SYSTEM=native
-  else
-    WINDOWSYSTEM=-DAPP_WINDOW_SYSTEM=sdl
+  ifeq ($(OS),osx)
+    CMAKE_BUILD_ARGUMENTS += -DCMAKE_DEPENDS_USE_COMPILER=OFF
   endif
 endif
 
@@ -35,7 +34,7 @@ endif
 
 all:
 	mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR); $(CMAKE) $(CMAKE_BUILD_ARGUMENTS) $(WINDOWSYSTEM) -DENABLE_INTERNAL_CROSSGUID=ON -DENABLE_INTERNAL_FFMPEG=OFF $(CMAKE_EXTRA_ARGUMENTS) $(CMAKE_SOURCE_DIR)
+	cd $(BUILD_DIR); $(CMAKE) $(CMAKE_BUILD_ARGUMENTS) -DENABLE_INTERNAL_CROSSGUID=ON -DENABLE_INTERNAL_FFMPEG=OFF $(CMAKE_EXTRA_ARGUMENTS) $(CMAKE_SOURCE_DIR)
 
 kodi:
 	$(MAKE) -C $(BUILD_DIR)

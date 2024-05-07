@@ -9,16 +9,24 @@
 #include "AESinkPipewire.h"
 
 #include "CompileInfo.h"
+#include "PipewireGlobal.h"
 #include "cores/AudioEngine/AESinkFactory.h"
 #include "cores/AudioEngine/Sinks/pipewire/Pipewire.h"
 #include "cores/AudioEngine/Sinks/pipewire/PipewireCore.h"
 #include "cores/AudioEngine/Sinks/pipewire/PipewireNode.h"
+#include "cores/AudioEngine/Sinks/pipewire/PipewireRegistry.h"
 #include "cores/AudioEngine/Sinks/pipewire/PipewireStream.h"
 #include "cores/AudioEngine/Sinks/pipewire/PipewireThreadLoop.h"
+#include "utils/Map.h"
+#include "utils/StringUtils.h"
 #include "utils/log.h"
 
 #include <pipewire/keys.h>
+#include <spa/param/audio/format-utils.h>
 #include <spa/param/audio/raw.h>
+#include <spa/pod/builder.h>
+
+using namespace std::chrono_literals;
 
 namespace
 {
@@ -41,21 +49,23 @@ constexpr std::array<uint32_t, 14> defaultSampleRates = {
   384000};
 // clang-format on
 
-const std::map<spa_audio_format, AEDataFormat> formatMap = {
-    {SPA_AUDIO_FORMAT_U8, AEDataFormat::AE_FMT_U8},
-    {SPA_AUDIO_FORMAT_S16, AEDataFormat::AE_FMT_S16NE},
-    {SPA_AUDIO_FORMAT_S24_32, AEDataFormat::AE_FMT_S24NE4},
-    {SPA_AUDIO_FORMAT_S32, AEDataFormat::AE_FMT_S32NE},
-    {SPA_AUDIO_FORMAT_S24, AEDataFormat::AE_FMT_S24NE3},
-    {SPA_AUDIO_FORMAT_F32, AEDataFormat::AE_FMT_FLOAT}};
+constexpr auto formatMap = make_map<spa_audio_format, AEDataFormat>(
+    {{SPA_AUDIO_FORMAT_ENCODED, AEDataFormat::AE_FMT_RAW},
+     {SPA_AUDIO_FORMAT_U8, AEDataFormat::AE_FMT_U8},
+     {SPA_AUDIO_FORMAT_S16, AEDataFormat::AE_FMT_S16NE},
+     {SPA_AUDIO_FORMAT_S24_32, AEDataFormat::AE_FMT_S24NE4},
+     {SPA_AUDIO_FORMAT_S32, AEDataFormat::AE_FMT_S32NE},
+     {SPA_AUDIO_FORMAT_S24, AEDataFormat::AE_FMT_S24NE3},
+     {SPA_AUDIO_FORMAT_F32, AEDataFormat::AE_FMT_FLOAT}});
 
-uint8_t PWFormatToSampleSize(spa_audio_format format)
+constexpr uint8_t PWFormatToSampleSize(spa_audio_format format)
 {
   switch (format)
   {
     case SPA_AUDIO_FORMAT_S8:
     case SPA_AUDIO_FORMAT_U8:
       return 1;
+    case SPA_AUDIO_FORMAT_ENCODED:
     case SPA_AUDIO_FORMAT_S16:
       return 2;
     case SPA_AUDIO_FORMAT_S24:
@@ -69,10 +79,12 @@ uint8_t PWFormatToSampleSize(spa_audio_format format)
   }
 }
 
-std::string PWFormatToString(spa_audio_format format)
+constexpr std::string_view PWFormatToString(spa_audio_format format)
 {
   switch (format)
   {
+    case SPA_AUDIO_FORMAT_ENCODED:
+      return "encoded";
     case SPA_AUDIO_FORMAT_U8:
       return "u8";
     case SPA_AUDIO_FORMAT_S8:
@@ -94,22 +106,22 @@ std::string PWFormatToString(spa_audio_format format)
 
 spa_audio_format AEFormatToPWFormat(AEDataFormat& format)
 {
-  auto formats = std::find_if(formatMap.begin(), formatMap.end(),
-                              [&format](auto p) { return p.second == format; });
-  if (formats != formatMap.end())
-    return formats->first;
+  const auto it = std::find_if(formatMap.cbegin(), formatMap.cend(),
+                               [&format](auto p) { return p.second == format; });
+  if (it != formatMap.cend())
+    return it->first;
 
   // default if format not found in map
   return SPA_AUDIO_FORMAT_F32;
 }
 
-AEDataFormat PWFormatToAEFormat(spa_audio_format& format)
+constexpr AEDataFormat PWFormatToAEFormat(spa_audio_format& format)
 {
   return formatMap.at(format);
 }
 
 // clang-format off
-const std::map<spa_audio_channel, AEChannel> channelMap = {
+constexpr auto channelMap = make_map<spa_audio_channel, AEChannel>({
     {SPA_AUDIO_CHANNEL_FL, AEChannel::AE_CH_FL},
     {SPA_AUDIO_CHANNEL_FR, AEChannel::AE_CH_FR},
     {SPA_AUDIO_CHANNEL_FC, AEChannel::AE_CH_FC},
@@ -130,7 +142,7 @@ const std::map<spa_audio_channel, AEChannel> channelMap = {
     {SPA_AUDIO_CHANNEL_TRR, AEChannel::AE_CH_TBR},
     {SPA_AUDIO_CHANNEL_BC, AEChannel::AE_CH_BC},
     {SPA_AUDIO_CHANNEL_BLC, AEChannel::AE_CH_BLOC},
-    {SPA_AUDIO_CHANNEL_BRC, AEChannel::AE_CH_BROC}};
+    {SPA_AUDIO_CHANNEL_BRC, AEChannel::AE_CH_BROC}});
 // clang-format on
 
 std::vector<spa_audio_channel> AEChannelMapToPWChannelMap(CAEChannelInfo& channelInfo)
@@ -138,12 +150,12 @@ std::vector<spa_audio_channel> AEChannelMapToPWChannelMap(CAEChannelInfo& channe
   std::vector<spa_audio_channel> channels;
   for (uint32_t count = 0; count < channelInfo.Count(); count++)
   {
-    auto channel =
-        std::find_if(channelMap.begin(), channelMap.end(),
+    const auto it =
+        std::find_if(channelMap.cbegin(), channelMap.cend(),
                      [&channelInfo, &count](auto p) { return p.second == channelInfo[count]; });
 
-    if (channel != channelMap.end())
-      channels.emplace_back(channel->first);
+    if (it != channelMap.cend())
+      channels.emplace_back(it->first);
   }
 
   return channels;
@@ -158,38 +170,93 @@ CAEChannelInfo PWChannelMapToAEChannelMap(std::vector<spa_audio_channel>& channe
   return channels;
 }
 
+constexpr auto iec958CodecMap = make_map<CAEStreamInfo::DataType, spa_audio_iec958_codec>({
+    {CAEStreamInfo::STREAM_TYPE_DTS_512, SPA_AUDIO_IEC958_CODEC_DTS},
+    {CAEStreamInfo::STREAM_TYPE_DTS_1024, SPA_AUDIO_IEC958_CODEC_DTS},
+    {CAEStreamInfo::STREAM_TYPE_DTS_2048, SPA_AUDIO_IEC958_CODEC_DTS},
+    {CAEStreamInfo::STREAM_TYPE_DTSHD_CORE, SPA_AUDIO_IEC958_CODEC_DTS},
+
+    {CAEStreamInfo::STREAM_TYPE_AC3, SPA_AUDIO_IEC958_CODEC_AC3},
+
+    {CAEStreamInfo::STREAM_TYPE_EAC3, SPA_AUDIO_IEC958_CODEC_EAC3},
+
+    {CAEStreamInfo::STREAM_TYPE_TRUEHD, SPA_AUDIO_IEC958_CODEC_TRUEHD},
+
+    {CAEStreamInfo::STREAM_TYPE_DTSHD, SPA_AUDIO_IEC958_CODEC_DTSHD},
+    {CAEStreamInfo::STREAM_TYPE_DTSHD_MA, SPA_AUDIO_IEC958_CODEC_DTSHD},
+});
+
+constexpr spa_audio_iec958_codec AEStreamInfoDataTypeToPWIEC958Codec(
+    const CAEStreamInfo::DataType& type)
+{
+  const auto it = iec958CodecMap.find(type);
+  if (it != iec958CodecMap.cend())
+    return it->second;
+
+  return SPA_AUDIO_IEC958_CODEC_UNKNOWN;
+}
+
+// constexpr in c++20
+std::vector<CAEStreamInfo::DataType> PWIEC958CodecToAEStreamInfoDataTypeList(
+    const spa_audio_iec958_codec& codec)
+{
+  // clang-format off
+  auto codecMap = std::map<spa_audio_iec958_codec, std::vector<CAEStreamInfo::DataType>>({
+    {SPA_AUDIO_IEC958_CODEC_DTS, {CAEStreamInfo::STREAM_TYPE_DTS_512,
+                                  CAEStreamInfo::STREAM_TYPE_DTS_1024,
+                                  CAEStreamInfo::STREAM_TYPE_DTS_2048,
+                                  CAEStreamInfo::STREAM_TYPE_DTSHD_CORE}},
+    {SPA_AUDIO_IEC958_CODEC_AC3, {CAEStreamInfo::STREAM_TYPE_AC3}},
+    {SPA_AUDIO_IEC958_CODEC_EAC3, {CAEStreamInfo::STREAM_TYPE_EAC3}},
+    {SPA_AUDIO_IEC958_CODEC_TRUEHD, {CAEStreamInfo::STREAM_TYPE_TRUEHD}},
+    {SPA_AUDIO_IEC958_CODEC_DTSHD, {CAEStreamInfo::STREAM_TYPE_DTSHD,
+                                    CAEStreamInfo::STREAM_TYPE_DTSHD_MA}},
+  });
+  // clang-format on
+
+  const auto it = codecMap.find(codec);
+  if (it != codecMap.cend())
+    return it->second;
+
+  return {};
+}
+
+std::chrono::duration<double, std::ratio<1>> PWTimeToAEDelay(const pw_time& time,
+                                                             const uint32_t& samplerate)
+{
+  const auto now = std::chrono::steady_clock::now();
+
+  const int64_t diff = now.time_since_epoch().count() - time.now;
+  const int64_t elapsed = (time.rate.denom * diff) / (time.rate.num * SPA_NSEC_PER_SEC);
+
+  const double fraction = static_cast<double>(time.rate.num) / time.rate.denom;
+
+  const auto delay = std::chrono::duration<double, std::ratio<1>>(
+      (time.buffered * fraction) + ((time.delay - elapsed) * fraction) +
+      (static_cast<double>(time.queued) / samplerate));
+
+  return delay;
+}
+
+constexpr std::chrono::duration<double, std::ratio<1>> DEFAULT_BUFFER_DURATION = 0.200s;
+constexpr int DEFAULT_PERIODS = 4;
+constexpr std::chrono::duration<double, std::ratio<1>> DEFAULT_PERIOD_DURATION =
+    DEFAULT_BUFFER_DURATION / DEFAULT_PERIODS;
+
+constexpr int DEFAULT_LATENCY_DIVIDER = 3;
+
 } // namespace
 
-namespace AE
-{
-namespace SINK
-{
+using namespace AE::SINK;
+using namespace KODI;
 
 std::unique_ptr<PIPEWIRE::CPipewire> pipewire;
 
 bool CAESinkPipewire::Register()
 {
-  pipewire = std::make_unique<PIPEWIRE::CPipewire>();
-
-  bool success{false};
-
-  try
-  {
-    success = pipewire->Start();
-  }
-  catch (std::exception& e)
-  {
-    success = false;
-  }
-
-  if (!success)
-  {
-    CLog::Log(LOGERROR, "CAESinkPipewire::{} - failed to connect to server", __FUNCTION__);
-    pipewire.reset();
+  pipewire = PIPEWIRE::CPipewire::Create();
+  if (!pipewire)
     return false;
-  }
-
-  CLog::Log(LOGINFO, "CAESinkPipewire::{} - connected to server", __FUNCTION__);
 
   AE::AESinkRegEntry entry;
   entry.sinkName = "PIPEWIRE";
@@ -201,75 +268,109 @@ bool CAESinkPipewire::Register()
   return true;
 }
 
-IAESink* CAESinkPipewire::Create(std::string& device, AEAudioFormat& desiredFormat)
+std::unique_ptr<IAESink> CAESinkPipewire::Create(std::string& device, AEAudioFormat& desiredFormat)
 {
-  IAESink* sink = new CAESinkPipewire();
+  auto sink = std::make_unique<CAESinkPipewire>();
   if (sink->Initialize(desiredFormat, device))
     return sink;
 
-  delete sink;
-  return nullptr;
+  return {};
 }
 
 void CAESinkPipewire::EnumerateDevicesEx(AEDeviceInfoList& list, bool force)
 {
-  auto loop = pipewire->GetThreadLoop();
-  loop->Lock();
+  auto& loop = pipewire->GetThreadLoop();
 
-  CAEDeviceInfo device;
-  device.m_deviceType = AE_DEVTYPE_PCM;
-  device.m_deviceName = "Default";
-  device.m_displayName = "Default";
-  device.m_displayNameExtra = "Default Output Device (PIPEWIRE)";
-  device.m_wantsIECPassthrough = true;
+  PIPEWIRE::CLoopLockGuard lock(loop);
 
-  for (const auto& format : formatMap)
-    device.m_dataFormats.emplace_back(format.second);
+  CAEDeviceInfo defaultDevice;
+  defaultDevice.m_deviceType = AE_DEVTYPE_PCM;
+  defaultDevice.m_deviceName = "Default";
+  defaultDevice.m_displayName = "Default";
+  defaultDevice.m_displayNameExtra = "Default Output Device (PIPEWIRE)";
+  defaultDevice.m_wantsIECPassthrough = true;
 
-  for (const auto& rate : defaultSampleRates)
-    device.m_sampleRates.emplace_back(rate);
+  std::for_each(formatMap.cbegin(), formatMap.cend(),
+                [&defaultDevice](const auto& pair)
+                { defaultDevice.m_dataFormats.emplace_back(pair.second); });
 
-  device.m_channels = CAEChannelInfo(AE_CH_LAYOUT_2_0);
+  std::for_each(defaultSampleRates.cbegin(), defaultSampleRates.cend(),
+                [&defaultDevice](const auto& rate)
+                { defaultDevice.m_sampleRates.emplace_back(rate); });
 
-  list.emplace_back(device);
+  defaultDevice.m_channels = CAEChannelInfo(AE_CH_LAYOUT_2_0);
 
-  for (const auto& global : pipewire->GetGlobals())
+  list.emplace_back(defaultDevice);
+
+  auto& registry = pipewire->GetRegistry();
+  for (const auto& [id, global] : registry.GetGlobals())
   {
     CAEDeviceInfo device;
     device.m_deviceType = AE_DEVTYPE_PCM;
-    device.m_deviceName = global.second->name;
-    device.m_displayName = global.second->description;
-    device.m_displayNameExtra = global.second->description + " (PIPEWIRE)";
+    device.m_deviceName = global->GetName();
+    device.m_displayName = global->GetDescription();
+    device.m_displayNameExtra = StringUtils::Format("{} (PIPEWIRE)", global->GetDescription());
     device.m_wantsIECPassthrough = true;
 
-    for (const auto& format : formatMap)
-      device.m_dataFormats.emplace_back(format.second);
+    std::for_each(formatMap.cbegin(), formatMap.cend(),
+                  [&device](const auto& pair) { device.m_dataFormats.emplace_back(pair.second); });
 
-    for (const auto& rate : defaultSampleRates)
-      device.m_sampleRates.emplace_back(rate);
+    std::for_each(defaultSampleRates.cbegin(), defaultSampleRates.cend(),
+                  [&device](const auto& rate) { device.m_sampleRates.emplace_back(rate); });
 
-    auto proxy = global.second->proxy.get();
-    auto node = static_cast<PIPEWIRE::CPipewireNode*>(proxy);
+    auto& node = global->GetNode();
+    node.EnumerateFormats();
 
-    node->EnumerateFormats();
+    int ret = loop.Wait(5s);
+    if (ret == -ETIMEDOUT)
+    {
+      CLog::Log(LOGDEBUG,
+                "CAESinkPipewire::{} - timed out out waiting for formats to be enumerated",
+                __FUNCTION__);
+      continue;
+    }
 
-    loop->Wait();
-
-    auto& channels = node->GetChannels();
+    auto& channels = node.GetChannels();
     if (channels.size() < 1)
       continue;
 
     for (const auto& channel : channels)
     {
-      auto ch = channelMap.find(channel);
-      if (ch != channelMap.end())
+      const auto ch = channelMap.find(channel);
+      if (ch != channelMap.cend())
         device.m_channels += ch->second;
+    }
+
+    for (const auto& iec958Codec : node.GetIEC958Codecs())
+    {
+      auto streamTypes = PWIEC958CodecToAEStreamInfoDataTypeList(iec958Codec);
+      device.m_streamTypes.insert(device.m_streamTypes.end(), streamTypes.begin(),
+                                  streamTypes.end());
+    }
+
+    // If DTS-HD-MA or TrueHD are configured 8 channels are needed
+    bool hasHBRFormat = std::any_of(device.m_streamTypes.cbegin(), device.m_streamTypes.cend(),
+                                    [](const auto& streamType)
+                                    {
+                                      return streamType == CAEStreamInfo::STREAM_TYPE_TRUEHD ||
+                                             streamType == CAEStreamInfo::STREAM_TYPE_DTSHD_MA;
+                                    });
+
+    if (!device.m_streamTypes.empty())
+    {
+      device.m_dataFormats.emplace_back(AE_FMT_RAW);
+      if (!hasHBRFormat && device.m_channels.Count() == 2)
+      {
+        device.m_deviceType = AE_DEVTYPE_IEC958;
+      }
+      else
+      {
+        device.m_deviceType = AE_DEVTYPE_HDMI;
+      }
     }
 
     list.emplace_back(device);
   }
-
-  loop->Unlock();
 }
 
 void CAESinkPipewire::Destroy()
@@ -279,13 +380,13 @@ void CAESinkPipewire::Destroy()
 
 bool CAESinkPipewire::Initialize(AEAudioFormat& format, std::string& device)
 {
-  auto core = pipewire->GetCore();
-  auto loop = pipewire->GetThreadLoop();
-  auto& stream = pipewire->GetStream();
+  auto& core = pipewire->GetCore();
+  auto& loop = pipewire->GetThreadLoop();
 
-  loop->Lock();
+  PIPEWIRE::CLoopLockGuard lock(loop);
 
-  auto& globals = pipewire->GetGlobals();
+  auto& registry = pipewire->GetRegistry();
+  auto& globals = registry.GetGlobals();
 
   uint32_t id;
   if (device == "Default")
@@ -295,39 +396,102 @@ bool CAESinkPipewire::Initialize(AEAudioFormat& format, std::string& device)
   else
   {
     auto target = std::find_if(globals.begin(), globals.end(),
-                               [&device](const auto& p) { return device == p.second->name; });
+                               [&device](const auto& p)
+                               {
+                                 const auto& [globalId, global] = p;
+                                 return device == global->GetName();
+                               });
     if (target == globals.end())
-    {
-      loop->Unlock();
       return false;
-    }
 
     id = target->first;
   }
 
-  stream = std::make_shared<PIPEWIRE::CPipewireStream>(core->Get());
+  bool passthrough = (format.m_dataFormat == AE_FMT_RAW);
 
-  stream->AddListener(pipewire.get());
+  if (passthrough)
+  {
+    format.m_channelLayout = AE_CH_LAYOUT_2_0;
 
-  m_latency = 20; // ms
-  uint32_t frames = std::nearbyint((m_latency * format.m_sampleRate) / 1000.0);
-  std::string fraction = StringUtils::Format("{}/{}", frames, format.m_sampleRate);
+    if (format.m_streamInfo.m_type == CAEStreamInfo::STREAM_TYPE_DTSHD_MA ||
+        format.m_streamInfo.m_type == CAEStreamInfo::STREAM_TYPE_TRUEHD)
+      format.m_channelLayout = AE_CH_LAYOUT_7_1;
+  }
 
-  std::array<spa_dict_item, 5> items = {
+  m_stream = std::make_unique<PIPEWIRE::CPipewireStream>(core);
+
+  m_latency = DEFAULT_BUFFER_DURATION;
+  uint32_t frames = std::nearbyint(DEFAULT_PERIOD_DURATION.count() * format.m_sampleRate);
+  std::string fraction =
+      StringUtils::Format("{}/{}", frames / DEFAULT_LATENCY_DIVIDER, format.m_sampleRate);
+
+  std::string srate = StringUtils::Format("1/{}", format.m_sampleRate);
+
+  std::array<spa_dict_item, 6> items = {
       SPA_DICT_ITEM_INIT(PW_KEY_MEDIA_TYPE, "Audio"),
       SPA_DICT_ITEM_INIT(PW_KEY_MEDIA_CATEGORY, "Playback"),
       SPA_DICT_ITEM_INIT(PW_KEY_APP_NAME, CCompileInfo::GetAppName()),
       SPA_DICT_ITEM_INIT(PW_KEY_NODE_NAME, CCompileInfo::GetAppName()),
-      SPA_DICT_ITEM_INIT(PW_KEY_NODE_LATENCY, fraction.c_str())};
+      SPA_DICT_ITEM_INIT(PW_KEY_NODE_LATENCY, fraction.c_str()),
+      SPA_DICT_ITEM_INIT(PW_KEY_NODE_RATE, srate.c_str())};
 
   auto properties = SPA_DICT_INIT(items.data(), items.size());
-  stream->UpdateProperties(&properties);
+  m_stream->UpdateProperties(&properties);
 
   auto pwFormat = AEFormatToPWFormat(format.m_dataFormat);
   format.m_dataFormat = PWFormatToAEFormat(pwFormat);
 
   auto pwChannels = AEChannelMapToPWChannelMap(format.m_channelLayout);
   format.m_channelLayout = PWChannelMapToAEChannelMap(pwChannels);
+
+  std::array<uint8_t, 1024> buffer;
+  auto builder = SPA_POD_BUILDER_INIT(buffer.data(), buffer.size());
+
+  std::vector<const spa_pod*> params;
+
+  // clang-format off
+  params.emplace_back(static_cast<const spa_pod*>(spa_pod_builder_add_object(
+      &builder, SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+          SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(20, 16, 24),
+          SPA_PARAM_BUFFERS_blocks, SPA_POD_Int(1),
+          SPA_PARAM_BUFFERS_size, SPA_POD_Int(frames * pwChannels.size() * PWFormatToSampleSize(pwFormat)),
+          SPA_PARAM_BUFFERS_stride, SPA_POD_Int(pwChannels.size() * PWFormatToSampleSize(pwFormat)))));
+  // clang-format on
+
+  pw_stream_flags flags =
+      static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_INACTIVE |
+                                   PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_DRIVER);
+
+  if (!passthrough)
+  {
+    spa_audio_info_raw info{};
+    info.format = pwFormat;
+    info.flags = SPA_AUDIO_FLAG_NONE;
+    info.rate = format.m_sampleRate;
+    info.channels = static_cast<uint32_t>(pwChannels.size());
+
+    for (size_t index = 0; index < pwChannels.size(); index++)
+      info.position[index] = pwChannels[index];
+
+    params.emplace_back(spa_format_audio_raw_build(&builder, SPA_PARAM_EnumFormat, &info));
+  }
+
+  if (passthrough)
+  {
+    spa_audio_info_iec958 info{};
+    info.codec = AEStreamInfoDataTypeToPWIEC958Codec(format.m_streamInfo.m_type);
+    info.flags = SPA_AUDIO_FLAG_NONE;
+    info.rate = format.m_sampleRate;
+
+    params.emplace_back(spa_format_audio_iec958_build(&builder, SPA_PARAM_EnumFormat, &info));
+
+    flags = static_cast<pw_stream_flags>(PW_STREAM_FLAG_EXCLUSIVE | static_cast<int>(flags));
+
+    format.m_dataFormat = AE_FMT_S16NE;
+  }
+
+  if (!m_stream->Connect(id, PW_DIRECTION_OUTPUT, params, flags))
+    return false;
 
   CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - rate: {}", __FUNCTION__, format.m_sampleRate);
   CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - channels: {}", __FUNCTION__, pwChannels.size());
@@ -337,33 +501,25 @@ bool CAESinkPipewire::Initialize(AEAudioFormat& format, std::string& device)
   CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - framesize: {}", __FUNCTION__,
             pwChannels.size() * PWFormatToSampleSize(pwFormat));
   CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - latency: {}/{} ({:.3f}s)", __FUNCTION__, frames,
-            format.m_sampleRate, static_cast<double>(frames) / format.m_sampleRate);
-
-  spa_audio_info_raw info{};
-  info.format = pwFormat;
-  info.flags = SPA_AUDIO_FLAG_NONE;
-  info.rate = format.m_sampleRate;
-  info.channels = static_cast<uint32_t>(pwChannels.size());
-
-  for (size_t index = 0; index < pwChannels.size(); index++)
-    info.position[index] = pwChannels[index];
-
-  if (!stream->Connect(id, info))
-  {
-    loop->Unlock();
-    return false;
-  }
+            format.m_sampleRate,
+            static_cast<double>(frames) / DEFAULT_LATENCY_DIVIDER / format.m_sampleRate);
 
   pw_stream_state state;
   do
   {
-    state = stream->GetState();
+    state = m_stream->GetState();
     if (state == PW_STREAM_STATE_PAUSED)
       break;
 
     CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - waiting", __FUNCTION__);
 
-    loop->Wait();
+    int ret = loop.Wait(5s);
+    if (ret == -ETIMEDOUT)
+    {
+      CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - timed out waiting for stream to be paused",
+                __FUNCTION__);
+      return false;
+    }
   } while (state != PW_STREAM_STATE_PAUSED);
 
   CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - initialized", __FUNCTION__);
@@ -373,57 +529,54 @@ bool CAESinkPipewire::Initialize(AEAudioFormat& format, std::string& device)
 
   m_format = format;
 
-  loop->Unlock();
-
   return true;
 }
 
 void CAESinkPipewire::Deinitialize()
 {
-  auto loop = pipewire->GetThreadLoop();
-  auto& stream = pipewire->GetStream();
+  auto& loop = pipewire->GetThreadLoop();
 
-  loop->Lock();
+  PIPEWIRE::CLoopLockGuard lock(loop);
 
-  stream->Flush(false);
+  m_stream->Flush(false);
 
-  loop->Unlock();
-
-  stream.reset();
+  m_stream.reset();
 }
 
 double CAESinkPipewire::GetCacheTotal()
 {
-  return m_latency / 1000.0;
+  return m_latency.count();
 }
 
 unsigned int CAESinkPipewire::AddPackets(uint8_t** data, unsigned int frames, unsigned int offset)
 {
-  auto loop = pipewire->GetThreadLoop();
-  auto& stream = pipewire->GetStream();
+  const auto start = std::chrono::steady_clock::now();
 
-  loop->Lock();
+  auto& loop = pipewire->GetThreadLoop();
 
-  if (stream->GetState() == PW_STREAM_STATE_PAUSED)
-    stream->SetActive(true);
+  PIPEWIRE::CLoopLockGuard lock(loop);
+
+  if (m_stream->GetState() == PW_STREAM_STATE_PAUSED)
+    m_stream->SetActive(true);
 
   pw_buffer* pwBuffer = nullptr;
   while (!pwBuffer)
   {
-    pwBuffer = stream->DequeueBuffer();
+    pwBuffer = m_stream->DequeueBuffer();
     if (pwBuffer)
       break;
 
-    loop->Wait();
+    int ret = loop.Wait(1s);
+    if (ret == -ETIMEDOUT)
+      return 0;
   }
+
+  pwBuffer->size = frames;
 
   spa_buffer* spaBuffer = pwBuffer->buffer;
   spa_data* spaData = &spaBuffer->datas[0];
 
   size_t length = frames * m_format.m_frameSize;
-
-  if (spaData->maxsize < length)
-    length = spaData->maxsize;
 
   void* buffer = data[0] + offset * m_format.m_frameSize;
 
@@ -433,31 +586,62 @@ unsigned int CAESinkPipewire::AddPackets(uint8_t** data, unsigned int frames, un
   spaData->chunk->stride = m_format.m_frameSize;
   spaData->chunk->size = length;
 
-  stream->QueueBuffer(pwBuffer);
+  m_stream->QueueBuffer(pwBuffer);
 
-  loop->Unlock();
+  const auto period = std::chrono::duration<double, std::ratio<1>>(static_cast<double>(frames) /
+                                                                   m_format.m_sampleRate);
 
-  return length / m_format.m_frameSize;
+  do
+  {
+    pw_time time = m_stream->GetTime();
+
+    const std::chrono::duration<double, std::ratio<1>> delay =
+        PWTimeToAEDelay(time, m_format.m_sampleRate);
+
+    const auto now = std::chrono::steady_clock::now();
+
+    if ((delay <= (DEFAULT_BUFFER_DURATION - DEFAULT_PERIOD_DURATION)) || ((now - start) >= period))
+      break;
+
+    loop.Wait(5ms);
+
+  } while (true);
+
+  m_stream->TriggerProcess();
+
+  return frames;
 }
 
 void CAESinkPipewire::GetDelay(AEDelayStatus& status)
 {
-  status.SetDelay(m_latency / 1000.0);
+  auto& loop = pipewire->GetThreadLoop();
+
+  PIPEWIRE::CLoopLockGuard lock(loop);
+
+  pw_stream_state state = m_stream->GetState();
+
+  pw_time time = m_stream->GetTime();
+
+  if (state != PW_STREAM_STATE_STREAMING)
+    return;
+
+  const std::chrono::duration<double, std::ratio<1>> delay =
+      PWTimeToAEDelay(time, m_format.m_sampleRate);
+
+  status.SetDelay(delay.count());
 }
 
 void CAESinkPipewire::Drain()
 {
-  auto loop = pipewire->GetThreadLoop();
-  auto& stream = pipewire->GetStream();
+  auto& loop = pipewire->GetThreadLoop();
 
-  loop->Lock();
+  PIPEWIRE::CLoopLockGuard lock(loop);
 
-  stream->Flush(true);
+  m_stream->Flush(true);
 
-  loop->Wait();
-
-  loop->Unlock();
+  int ret = loop.Wait(1s);
+  if (ret == -ETIMEDOUT)
+  {
+    CLog::Log(LOGDEBUG, "CAESinkPipewire::{} - wait timed out, already drained?", __FUNCTION__);
+  }
 }
-
-} // namespace SINK
-} // namespace AE

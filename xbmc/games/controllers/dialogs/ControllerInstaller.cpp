@@ -9,10 +9,12 @@
 #include "ControllerInstaller.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "ServiceBroker.h"
 #include "addons/Addon.h"
 #include "addons/AddonInstaller.h"
 #include "addons/AddonManager.h"
+#include "addons/addoninfo/AddonType.h"
 #include "dialogs/GUIDialogProgress.h"
 #include "dialogs/GUIDialogSelect.h"
 #include "guilib/GUIComponent.h"
@@ -48,7 +50,7 @@ void CControllerInstaller::Process()
 
   ADDON::VECADDONS installableAddons;
   CServiceBroker::GetAddonMgr().GetInstallableAddons(installableAddons,
-                                                     ADDON::ADDON_GAME_CONTROLLER);
+                                                     ADDON::AddonType::GAME_CONTROLLER);
   if (installableAddons.empty())
   {
     // "Controller profiles"

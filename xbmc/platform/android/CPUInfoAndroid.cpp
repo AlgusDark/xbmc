@@ -21,10 +21,8 @@ std::shared_ptr<CCPUInfo> CCPUInfo::GetCPUInfo()
   return std::make_shared<CCPUInfoAndroid>();
 }
 
-CCPUInfoAndroid::CCPUInfoAndroid()
+CCPUInfoAndroid::CCPUInfoAndroid() : m_posixFile(std::make_unique<CPosixFile>())
 {
-  m_posixFile = std::make_unique<CPosixFile>();
-
   if (m_posixFile && m_posixFile->Open(CURL("/proc/cpuinfo")))
   {
     std::array<char, 2048> buffer = {};
@@ -35,10 +33,21 @@ CCPUInfoAndroid::CCPUInfoAndroid()
       {
         if (line.find("vendor_id") != std::string::npos)
           m_cpuVendor = line.substr(line.find(':') + 2);
+
         else if (line.find("model name") != std::string::npos)
           m_cpuModel = line.substr(line.find(':') + 2);
+
         else if (line.find("BogoMIPS") != std::string::npos)
           m_cpuBogoMips = line.substr(line.find(':') + 2);
+
+        else if (line.find("Hardware") != std::string::npos)
+          m_cpuHardware = line.substr(line.find(':') + 2);
+
+        else if (line.find("Serial") != std::string::npos)
+          m_cpuSerial = line.substr(line.find(':') + 2);
+
+        else if (line.find("Revision") != std::string::npos)
+          m_cpuRevision = line.substr(line.find(':') + 2);
       }
     }
 

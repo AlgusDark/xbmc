@@ -11,22 +11,21 @@
 #include "ServiceBroker.h"
 #include "addons/AddonInstaller.h"
 #include "addons/AddonManager.h"
-#include "filesystem/File.h"
+#include "addons/addoninfo/AddonType.h"
 #include "interfaces/builtins/Builtins.h"
-#include "messaging/helpers/DialogHelper.h"
 #include "profiles/ProfileManager.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "settings/lib/Setting.h"
+#include "utils/FileUtils.h"
 #include "utils/RssReader.h"
 #include "utils/StringUtils.h"
-#include "utils/Variant.h"
+#include "utils/XBMCTinyXML2.h"
 #include "utils/log.h"
 
 #include <mutex>
 #include <utility>
 
-using namespace XFILE;
 using namespace KODI::MESSAGING;
 
 
@@ -65,7 +64,7 @@ void CRssManager::OnSettingAction(const std::shared_ptr<const CSetting>& setting
   if (settingId == CSettings::SETTING_LOOKANDFEEL_RSSEDIT)
   {
     ADDON::AddonPtr addon;
-    if (!CServiceBroker::GetAddonMgr().GetAddon("script.rss.editor", addon, ADDON::ADDON_UNKNOWN,
+    if (!CServiceBroker::GetAddonMgr().GetAddon("script.rss.editor", addon,
                                                 ADDON::OnlyEnabled::CHOICE_YES))
     {
       if (!ADDON::CAddonInstaller::GetInstance().InstallModal(
@@ -100,61 +99,60 @@ bool CRssManager::Load()
   std::unique_lock<CCriticalSection> lock(m_critical);
 
   std::string rssXML = profileManager->GetUserDataItem("RssFeeds.xml");
-  if (!CFile::Exists(rssXML))
+  if (!CFileUtils::Exists(rssXML))
     return false;
 
-  CXBMCTinyXML rssDoc;
+  CXBMCTinyXML2 rssDoc;
   if (!rssDoc.LoadFile(rssXML))
   {
-    CLog::Log(LOGERROR, "CRssManager: error loading {}, Line {}\n{}", rssXML, rssDoc.ErrorRow(),
-              rssDoc.ErrorDesc());
+    CLog::Log(LOGERROR, "CRssManager: error loading {}, Line {}\n{}", rssXML, rssDoc.ErrorLineNum(),
+              rssDoc.ErrorStr());
     return false;
   }
 
-  const TiXmlElement *pRootElement = rssDoc.RootElement();
-  if (pRootElement == NULL || !StringUtils::EqualsNoCase(pRootElement->ValueStr(), "rssfeeds"))
+  auto* rootElement = rssDoc.RootElement();
+  if (!rootElement || !StringUtils::EqualsNoCase(rootElement->Value(), "rssfeeds"))
   {
     CLog::Log(LOGERROR, "CRssManager: error loading {}, no <rssfeeds> node", rssXML);
     return false;
   }
 
   m_mapRssUrls.clear();
-  const TiXmlElement* pSet = pRootElement->FirstChildElement("set");
-  while (pSet != NULL)
+  auto* setElement = rootElement->FirstChildElement("set");
+  while (setElement)
   {
     int iId;
-    if (pSet->QueryIntAttribute("id", &iId) == TIXML_SUCCESS)
+    if (setElement->QueryIntAttribute("id", &iId) == tinyxml2::XML_SUCCESS)
     {
       RssSet set;
-      set.rtl = pSet->Attribute("rtl") != NULL &&
-                StringUtils::CompareNoCase(pSet->Attribute("rtl"), "true") == 0;
-      const TiXmlElement* pFeed = pSet->FirstChildElement("feed");
-      while (pFeed != NULL)
+      set.rtl = setElement->Attribute("rtl") != nullptr &&
+                StringUtils::CompareNoCase(setElement->Attribute("rtl"), "true") == 0;
+      auto* feedElement = setElement->FirstChildElement("feed");
+      while (feedElement)
       {
-        int iInterval;
-        if (pFeed->QueryIntAttribute("updateinterval", &iInterval) != TIXML_SUCCESS)
+        int iInterval = 30; // default to 30 min
+        if (feedElement->QueryIntAttribute("updateinterval", &iInterval) != tinyxml2::XML_SUCCESS)
         {
-          iInterval = 30; // default to 30 min
           CLog::Log(LOGDEBUG, "CRssManager: no interval set, default to 30!");
         }
 
-        if (pFeed->FirstChild() != NULL)
+        if (feedElement->FirstChild())
         {
-          //! @todo UTF-8: Do these URLs need to be converted to UTF-8?
-          //!              What about the xml encoding?
-          std::string strUrl = pFeed->FirstChild()->ValueStr();
+          std::string strUrl = feedElement->FirstChild()->Value();
           set.url.push_back(strUrl);
           set.interval.push_back(iInterval);
         }
-        pFeed = pFeed->NextSiblingElement("feed");
+        feedElement = feedElement->NextSiblingElement("feed");
       }
 
       m_mapRssUrls.insert(std::make_pair(iId,set));
     }
     else
+    {
       CLog::Log(LOGERROR, "CRssManager: found rss url set with no id in RssFeeds.xml, ignored");
+    }
 
-    pSet = pSet->NextSiblingElement("set");
+    setElement = setElement->NextSiblingElement("set");
   }
 
   return true;

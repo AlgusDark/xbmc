@@ -6,9 +6,13 @@
  *  See LICENSES/README.md for more information.
  */
 #include "FFmpegImage.h"
-#include "utils/log.h"
+
 #include "cores/FFmpeg.h"
 #include "guilib/Texture.h"
+#include "settings/AdvancedSettings.h"
+#include "settings/Settings.h"
+#include "settings/SettingsComponent.h"
+#include "utils/log.h"
 
 #include <algorithm>
 
@@ -48,7 +52,7 @@ struct ThumbDataManagement
   AVFrame* frame_temporary = nullptr;
   SwsContext* sws = nullptr;
   AVCodecContext* avOutctx = nullptr;
-  AVCodec* codec = nullptr;
+  const AVCodec* codec = nullptr;
   ~ThumbDataManagement()
   {
     av_free(intermediateBuffer);
@@ -194,9 +198,16 @@ bool CFFmpegImage::Initialize(unsigned char* buffer, size_t bufSize)
   bool is_png = (bufSize > 3 && buffer[1] == 'P' && buffer[2] == 'N' && buffer[3] == 'G');
   bool is_tiff = (bufSize > 2 && buffer[0] == 'I' && buffer[1] == 'I' && buffer[2] == '*');
 
-  AVInputFormat* inp = nullptr;
+  // See Github #19113
+#if LIBAVCODEC_VERSION_MAJOR < 60
+  constexpr char jpegFormat[] = "image2";
+#else
+  constexpr char jpegFormat[] = "jpeg_pipe";
+#endif
+
+  const AVInputFormat* inp = nullptr;
   if (is_jpeg)
-    inp = av_find_input_format("image2");
+    inp = av_find_input_format(jpegFormat);
   else if (m_strMimeType == "image/apng")
     inp = av_find_input_format("apng");
   else if (is_png)
@@ -209,13 +220,15 @@ bool CFFmpegImage::Initialize(unsigned char* buffer, size_t bufSize)
     inp = av_find_input_format("webp_pipe");
   // brute force parse if above check already failed
   else if (m_strMimeType == "image/jpeg" || m_strMimeType == "image/jpg")
-    inp = av_find_input_format("image2");
+    inp = av_find_input_format(jpegFormat);
   else if (m_strMimeType == "image/png")
     inp = av_find_input_format("png_pipe");
   else if (m_strMimeType == "image/tiff")
     inp = av_find_input_format("tiff_pipe");
   else if (m_strMimeType == "image/gif")
     inp = av_find_input_format("gif");
+  else if (m_strMimeType == "image/avif")
+    inp = av_find_input_format("avif");
 
   if (avformat_open_input(&m_fctx, NULL, inp, NULL) < 0)
   {
@@ -232,7 +245,7 @@ bool CFFmpegImage::Initialize(unsigned char* buffer, size_t bufSize)
     return false;
   }
   AVCodecParameters* codec_params = m_fctx->streams[0]->codecpar;
-  AVCodec* codec = avcodec_find_decoder(codec_params->codec_id);
+  const AVCodec* codec = avcodec_find_decoder(codec_params->codec_id);
   m_codec_ctx = avcodec_alloc_context3(codec);
   if (!m_codec_ctx)
   {
@@ -290,7 +303,15 @@ AVFrame* CFFmpegImage::ExtractFrame()
     return nullptr;
   }
   //we need milliseconds
-  frame->pkt_duration = av_rescale_q(frame->pkt_duration, m_fctx->streams[0]->time_base, AVRational{ 1, 1000 });
+
+#if LIBAVCODEC_VERSION_MAJOR < 60
+  frame->pkt_duration =
+      av_rescale_q(frame->pkt_duration, m_fctx->streams[0]->time_base, AVRational{1, 1000});
+#else
+  frame->duration =
+      av_rescale_q(frame->duration, m_fctx->streams[0]->time_base, AVRational{1, 1000});
+#endif
+
   m_height = frame->height;
   m_width = frame->width;
   m_originalWidth = m_width;
@@ -582,7 +603,10 @@ bool CFFmpegImage::CreateThumbnailFromSurface(unsigned char* bufferin, unsigned 
   tdm.avOutctx->flags = AV_CODEC_FLAG_QSCALE;
   tdm.avOutctx->mb_lmin = tdm.avOutctx->qmin * FF_QP2LAMBDA;
   tdm.avOutctx->mb_lmax = tdm.avOutctx->qmax * FF_QP2LAMBDA;
-  tdm.avOutctx->global_quality = tdm.avOutctx->qmin * FF_QP2LAMBDA;
+  unsigned int quality =
+      CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_imageQualityJpeg;
+  tdm.avOutctx->global_quality =
+      jpg_output ? quality * FF_QP2LAMBDA : tdm.avOutctx->qmin * FF_QP2LAMBDA;
 
   unsigned int internalBufOutSize = 0;
 
@@ -738,7 +762,13 @@ std::shared_ptr<Frame> CFFmpegImage::ReadFrame()
   if (avframe == nullptr)
     return nullptr;
   std::shared_ptr<Frame> frame(new Frame());
+
+#if LIBAVCODEC_VERSION_MAJOR < 60
   frame->m_delay = (unsigned int)avframe->pkt_duration;
+#else
+  frame->m_delay = (unsigned int)avframe->duration;
+#endif
+
   frame->m_pitch = avframe->width * 4;
   frame->m_pImage = (unsigned char*) av_malloc(avframe->height * frame->m_pitch);
   DecodeFrame(avframe, avframe->width, avframe->height, frame->m_pitch, frame->m_pImage);

@@ -31,8 +31,8 @@ public:
   CAESinkPULSE();
   ~CAESinkPULSE() override;
 
-  static bool Register();
-  static IAESink* Create(std::string &device, AEAudioFormat &desiredFormat);
+  static bool Register(bool allowPipeWireCompatServer);
+  static std::unique_ptr<IAESink> Create(std::string& device, AEAudioFormat& desiredFormat);
   static void EnumerateDevicesEx(AEDeviceInfoList &list, bool force = false);
   static void Cleanup();
 
@@ -53,7 +53,7 @@ public:
   pa_stream* GetInternalStream();
   pa_threaded_mainloop* GetInternalMainLoop();
   CCriticalSection m_sec;
-  std::atomic<int> m_requestedBytes;
+  std::atomic<int> m_requestedBytes = 0;
 
 private:
   void Pause(bool pause);

@@ -152,10 +152,7 @@ public:
   std::string GetMimeType() const { return m_cStructure->m_mimeType; }
 
   /// @brief Amount of available properties.
-  unsigned int GetPropertiesAmount() const
-  {
-    return m_cStructure->m_nCountInfoValues;
-  }
+  unsigned int GetPropertiesAmount() const { return m_cStructure->m_nCountInfoValues; }
 
   /// @brief List of available properties-
   const std::map<std::string, std::string> GetProperties() const
@@ -602,8 +599,8 @@ public:
   /// See https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/codec_desc.c about
   /// available names.
   ///
-  /// @remark On @ref INPUTSTREAM_TYPE_TELETEXT and @ref INPUTSTREAM_TYPE_RDS
-  /// this can be ignored and leaved empty.
+  /// @remark On @ref INPUTSTREAM_TYPE_TELETEXT, @ref INPUTSTREAM_TYPE_RDS, and
+  /// @ref INPUTSTREAM_TYPE_ID3 this can be ignored and leaved empty.
   ///
   /// @param[in] codeName Codec name
   void SetCodecName(const std::string& codecName)
@@ -652,7 +649,7 @@ public:
   {
     m_extraData = extraData;
     m_cStructure->m_ExtraData = m_extraData.data();
-    m_cStructure->m_ExtraSize = m_extraData.size();
+    m_cStructure->m_ExtraSize = static_cast<unsigned int>(m_extraData.size());
   }
 
   /// @brief Additional data where can needed on streams.
@@ -669,7 +666,7 @@ public:
     }
 
     m_cStructure->m_ExtraData = m_extraData.data();
-    m_cStructure->m_ExtraSize = m_extraData.size();
+    m_cStructure->m_ExtraSize = static_cast<unsigned int>(m_extraData.size());
   }
 
   /// @brief To get with @ref SetExtraData changed values.
@@ -700,7 +697,7 @@ public:
   {
     m_extraData.clear();
     m_cStructure->m_ExtraData = m_extraData.data();
-    m_cStructure->m_ExtraSize = m_extraData.size();
+    m_cStructure->m_ExtraSize = static_cast<unsigned int>(m_extraData.size());
   }
 
   /// @brief RFC 5646 language code (empty string if undefined).
@@ -1555,12 +1552,28 @@ public:
   //----------------------------------------------------------------------------
 
   //============================================================================
-  /// @brief Sets desired width / height
+  /// @brief Notify current screen resolution
   ///
   /// @param[in] width Width to set
   /// @param[in] height Height to set
   ///
-  virtual void SetVideoResolution(int width, int height) {}
+  virtual void SetVideoResolution(unsigned int width, unsigned int height) {}
+  //----------------------------------------------------------------------------
+
+  //============================================================================
+  /// @brief Notify current screen resolution and max screen resolution allowed
+  ///
+  /// @param[in] width Width to set
+  /// @param[in] height Height to set
+  /// @param[in] maxWidth Max width allowed
+  /// @param[in] maxHeight Max height allowed
+  ///
+  virtual void SetVideoResolution(unsigned int width,
+                                  unsigned int height,
+                                  unsigned int maxWidth,
+                                  unsigned int maxHeight)
+  {
+  }
   //----------------------------------------------------------------------------
 
   //=============================================================================
@@ -1765,7 +1778,7 @@ private:
 
   void SetAddonStruct(KODI_ADDON_INSTANCE_STRUCT* instance)
   {
-    int api[3] = { 0, 0, 0 };
+    int api[3] = {0, 0, 0};
     sscanf(GetInstanceAPIVersion().c_str(), "%d.%d.%d", &api[0], &api[1], &api[2]);
 
     instance->hdl = this;
@@ -1837,7 +1850,6 @@ private:
     InputstreamCapabilities caps(capabilities);
     static_cast<CInstanceInputStream*>(instance->toAddon->addonInstance)->GetCapabilities(caps);
   }
-
 
   // IDemux
   inline static bool ADDON_GetStreamIds(const AddonInstance_InputStream* instance,
@@ -1927,13 +1939,16 @@ private:
   }
 
   inline static void ADDON_SetVideoResolution(const AddonInstance_InputStream* instance,
-                                              int width,
-                                              int height)
+                                              unsigned int width,
+                                              unsigned int height,
+                                              unsigned int maxWidth,
+                                              unsigned int maxHeight)
   {
     static_cast<CInstanceInputStream*>(instance->toAddon->addonInstance)
         ->SetVideoResolution(width, height);
+    static_cast<CInstanceInputStream*>(instance->toAddon->addonInstance)
+        ->SetVideoResolution(width, height, maxWidth, maxHeight);
   }
-
 
   // IDisplayTime
   inline static int ADDON_GetTotalTime(const AddonInstance_InputStream* instance)

@@ -8,11 +8,11 @@
 
 #import "platform/darwin/ios-common/AnnounceReceiver.h"
 
-#include "Application.h"
 #include "FileItem.h"
 #include "PlayListPlayer.h"
 #include "ServiceBroker.h"
 #include "TextureCache.h"
+#include "application/Application.h"
 #include "filesystem/SpecialProtocol.h"
 #include "music/MusicDatabase.h"
 #include "music/tags/MusicInfoTag.h"
@@ -141,7 +141,7 @@ void AnnounceBridge(ANNOUNCEMENT::AnnouncementFlag flag,
     if (duration > 0)
       item[@"duration"] = @(duration);
     item[@"elapsed"] = @(g_application.GetTime());
-    int current = CServiceBroker::GetPlaylistPlayer().GetCurrentSong();
+    int current = CServiceBroker::GetPlaylistPlayer().GetCurrentItemIdx();
     if (current >= 0)
     {
       item[@"current"] = @(current);

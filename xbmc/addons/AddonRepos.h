@@ -8,17 +8,18 @@
 
 #pragma once
 
-#include "AddonDatabase.h"
+#include "addons/AddonDatabase.h"
 
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ADDON
 {
 
-class AddonVersion;
+class CAddonVersion;
 class CAddonMgr;
 class CRepository;
 class IAddon;
@@ -30,14 +31,7 @@ enum class CheckAddonPath
   CHOICE_NO = false,
 };
 
-/**
- * Struct - CAddonWithUpdate
- */
-struct CAddonWithUpdate
-{
-  std::shared_ptr<IAddon> m_installed;
-  std::shared_ptr<IAddon> m_update;
-};
+using AddonWithUpdate = std::pair<std::shared_ptr<IAddon>, std::shared_ptr<IAddon>>;
 
 /**
  * Class - CAddonRepos
@@ -72,7 +66,7 @@ public:
    * \param[out] addonsWithUpdate target map
    */
   void BuildAddonsWithUpdateList(const std::vector<std::shared_ptr<IAddon>>& installed,
-                                 std::map<std::string, CAddonWithUpdate>& addonsWithUpdate) const;
+                                 std::map<std::string, AddonWithUpdate>& addonsWithUpdate) const;
 
   /*!
    * \brief Checks if the origin-repository of a given addon is defined as official repo
@@ -187,9 +181,9 @@ private:
    * \param map the repository map we want to check against
    * \param[out] pointer to the found update. if the addon is
    *              up-to-date on our system, this param will return 'nullptr'
-   * \return true if the addon was found in the desired map,
-   *         either up-to-date or newer version.
-   *         false if the addon does NOT exist in the map
+   * \return true if the addon was found in the desired map and
+   *         its version is newer than our local version.
+   *         false if the addon does NOT exist in the map or it is up to date.
    */
   bool FindAddonAndCheckForUpdate(const std::shared_ptr<IAddon>& addonToCheck,
                                   const std::map<std::string, std::shared_ptr<IAddon>>& map,

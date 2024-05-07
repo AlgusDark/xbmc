@@ -33,14 +33,14 @@ constexpr const int GUI_MSG_PLAYBACK_STOPPED       = GUI_MSG_USER + 7;
 
 //  Message is send by the playlistplayer when it starts a playlist
 //  Parameter:
-//  dwParam1 = Current Playlist, can be PLAYLIST_MUSIC, PLAYLIST_TEMP_MUSIC, PLAYLIST_VIDEO or PLAYLIST_TEMP_VIDEO
+//  dwParam1 = Current Playlist, can be PLAYLIST::TYPE_MUSIC or PLAYLIST::TYPE_VIDEO
 //  dwParam2 = Item started in the playlist
 //  lpVoid = Playlistitem started playing
 constexpr const int GUI_MSG_PLAYLISTPLAYER_STARTED  = GUI_MSG_USER + 8;
 
 //  Message is send by playlistplayer when next/previous item is started
 //  Parameter:
-//  dwParam1 = Current Playlist, can be PLAYLIST_MUSIC, PLAYLIST_TEMP_MUSIC, PLAYLIST_VIDEO or PLAYLIST_TEMP_VIDEO
+//  dwParam1 = Current Playlist, can be PLAYLIST::TYPE_MUSIC or PLAYLIST::TYPE_VIDEO
 //  dwParam2 = LOWORD Position of the current playlistitem
 //             HIWORD Position of the previous playlistitem
 //  lpVoid = Current Playlistitem
@@ -48,7 +48,7 @@ constexpr const int GUI_MSG_PLAYLISTPLAYER_CHANGED  = GUI_MSG_USER + 9;
 
 //  Message is send by the playlistplayer when the last item to play ended
 //  Parameter:
-//  dwParam1 = Current Playlist, can be PLAYLIST_MUSIC, PLAYLIST_TEMP_MUSIC, PLAYLIST_VIDEO or PLAYLIST_TEMP_VIDEO
+//  dwParam1 = Current Playlist, can be PLAYLIST::TYPE_MUSIC or PLAYLIST::TYPE_VIDEO
 //  dwParam2 = Playlistitem played when stopping
 constexpr const int GUI_MSG_PLAYLISTPLAYER_STOPPED  = GUI_MSG_USER + 10;
 
@@ -64,6 +64,9 @@ constexpr const int GUI_MSG_SCAN_FINISHED           = GUI_MSG_USER + 13;
 //  Player has requested the next item for caching purposes (PAPlayer)
 constexpr const int GUI_MSG_QUEUE_NEXT_ITEM         = GUI_MSG_USER + 16;
 
+//  Playback request for the trailer of a given item
+constexpr const int GUI_MSG_PLAY_TRAILER = GUI_MSG_USER + 17;
+
 // Visualisation messages when loading/unloading
 constexpr const int GUI_MSG_VISUALISATION_UNLOADING = GUI_MSG_USER + 117; // sent by vis
 constexpr const int GUI_MSG_VISUALISATION_LOADED    = GUI_MSG_USER + 118; // sent by vis
@@ -75,13 +78,13 @@ constexpr const int GUI_MSG_VIDEO_MENU_STARTED      = GUI_MSG_USER + 21; // sent
 
 //  Message is sent by built-in function to alert the playlist window
 //  that the user has initiated Random playback
-//  dwParam1 = Current Playlist (PLAYLIST_MUSIC, PLAYLIST_TEMP_MUSIC, PLAYLIST_VIDEO or PLAYLIST_TEMP_VIDEO)
+//  dwParam1 = Current Playlist (PLAYLIST::TYPE_MUSIC or PLAYLIST::TYPE_VIDEO)
 //  dwParam2 = 0 or 1 (Enabled or Disabled)
 constexpr const int GUI_MSG_PLAYLISTPLAYER_RANDOM   = GUI_MSG_USER + 22;
 
 //  Message is sent by built-in function to alert the playlist window
 //  that the user has initiated Repeat playback
-//  dwParam1 = Current Playlist (PLAYLIST_MUSIC, PLAYLIST_TEMP_MUSIC, PLAYLIST_VIDEO or PLAYLIST_TEMP_VIDEO)
+//  dwParam1 = Current Playlist (PLAYLIST::TYPE_MUSIC or PLAYLIST::TYPE_VIDEO)
 //  dwParam2 = 0 or 1 or 2 (Off, Repeat All, Repeat One)
 constexpr const int GUI_MSG_PLAYLISTPLAYER_REPEAT   = GUI_MSG_USER + 23;
 
@@ -130,7 +133,7 @@ constexpr const int GUI_MSG_SHOW_PICTURE            = GUI_MSG_USER + 36;
 constexpr const int GUI_MSG_EVENT_ADDED             = GUI_MSG_USER + 39;
 constexpr const int GUI_MSG_EVENT_REMOVED           = GUI_MSG_USER + 40;
 
-// Send to RDS Radiotext handlers to inform about changed data
+// Send to RDS RadioText handlers to inform about changed data
 constexpr const int GUI_MSG_UPDATE_RADIOTEXT        = GUI_MSG_USER + 41;
 
 constexpr const int GUI_MSG_PLAYBACK_ERROR          = GUI_MSG_USER + 42;
@@ -140,3 +143,8 @@ constexpr const int GUI_MSG_PLAYBACK_AVSTARTED      = GUI_MSG_USER + 44;
 // Sent to notify system sleep/wake
 constexpr const int GUI_MSG_SYSTEM_SLEEP  			= GUI_MSG_USER + 45;
 constexpr const int GUI_MSG_SYSTEM_WAKE 			= GUI_MSG_USER + 46;
+
+constexpr const int GUI_MSG_PLAYBACK_PAUSED = GUI_MSG_USER + 47;
+constexpr const int GUI_MSG_PLAYBACK_RESUMED = GUI_MSG_USER + 48;
+constexpr const int GUI_MSG_PLAYBACK_SEEKED = GUI_MSG_USER + 49;
+constexpr const int GUI_MSG_PLAYBACK_SPEED_CHANGED = GUI_MSG_USER + 50;

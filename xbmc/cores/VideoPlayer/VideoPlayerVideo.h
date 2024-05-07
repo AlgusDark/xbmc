@@ -93,7 +93,7 @@ protected:
   bool ProcessDecoderOutput(double &frametime, double &pts);
   void SendMessageBack(const std::shared_ptr<CDVDMsg>& pMsg, int priority = 0);
   MsgQueueReturnCode GetMessage(std::shared_ptr<CDVDMsg>& pMsg,
-                                unsigned int iTimeoutInMilliSeconds,
+                                std::chrono::milliseconds timeout,
                                 int& priority);
 
   EOutputState OutputPicture(const VideoPicture* src);
@@ -122,7 +122,7 @@ protected:
   bool m_bRenderSubs;
   float m_fForcedAspectRatio;
   int m_speed;
-  std::atomic_bool m_stalled;
+  std::atomic_bool m_stalled = false;
   std::atomic_bool m_rewindStalled;
   bool m_paused;
   IDVDStreamPlayer::ESyncState m_syncState;

@@ -8,7 +8,8 @@
 
 #include "ApplicationSkinHandling.h"
 
-#include "ApplicationPlayer.h"
+#include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIInfoManager.h"
 #include "GUILargeTextureManager.h"
 #include "GUIUserMessages.h"
@@ -16,7 +17,11 @@
 #include "ServiceBroker.h"
 #include "TextureCache.h"
 #include "addons/AddonManager.h"
+#include "addons/AddonVersion.h"
 #include "addons/Skin.h"
+#include "addons/addoninfo/AddonType.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "dialogs/GUIDialogButtonMenu.h"
 #include "dialogs/GUIDialogKaiToast.h"
 #include "dialogs/GUIDialogSubMenu.h"
@@ -29,30 +34,33 @@
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
 #include "guilib/StereoscopicsManager.h"
+#include "messaging/ApplicationMessenger.h"
 #include "messaging/helpers/DialogHelper.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
 #include "settings/SkinSettings.h"
 #include "settings/lib/Setting.h"
+#include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
+#include "utils/XBMCTinyXML.h"
 #include "utils/log.h"
 #include "video/dialogs/GUIDialogFullScreenInfo.h"
 
 using namespace KODI::MESSAGING;
 
-CApplicationSkinHandling::CApplicationSkinHandling(CApplicationPlayer& appPlayer)
-  : m_appPlayer(appPlayer)
+CApplicationSkinHandling::CApplicationSkinHandling(IMsgTargetCallback* msgCb,
+                                                   IWindowManagerCallback* wCb,
+                                                   bool& bInitializing)
+  : m_msgCb(msgCb), m_wCb(wCb), m_bInitializing(bInitializing)
 {
 }
 
-bool CApplicationSkinHandling::LoadSkin(const std::string& skinID,
-                                        IMsgTargetCallback* msgCb,
-                                        IWindowManagerCallback* wCb)
+bool CApplicationSkinHandling::LoadSkin(const std::string& skinID)
 {
-  ADDON::SkinPtr skin;
+  std::shared_ptr<ADDON::CSkinInfo> skin;
   {
     ADDON::AddonPtr addon;
-    if (!CServiceBroker::GetAddonMgr().GetAddon(skinID, addon, ADDON::ADDON_SKIN,
+    if (!CServiceBroker::GetAddonMgr().GetAddon(skinID, addon, ADDON::AddonType::SKIN,
                                                 ADDON::OnlyEnabled::CHOICE_YES))
       return false;
     skin = std::static_pointer_cast<ADDON::CSkinInfo>(addon);
@@ -68,12 +76,14 @@ bool CApplicationSkinHandling::LoadSkin(const std::string& skinID,
     GAME,
   } previousRenderingState = RENDERING_STATE::NONE;
 
-  if (m_appPlayer.IsPlayingVideo())
+  auto& components = CServiceBroker::GetAppComponents();
+  const auto appPlayer = components.GetComponent<CApplicationPlayer>();
+  if (appPlayer && appPlayer->IsPlayingVideo())
   {
-    bPreviousPlayingState = !m_appPlayer.IsPausedPlayback();
+    bPreviousPlayingState = !appPlayer->IsPausedPlayback();
     if (bPreviousPlayingState)
-      m_appPlayer.Pause();
-    m_appPlayer.FlushRenderer();
+      appPlayer->Pause();
+    appPlayer->FlushRenderer();
     if (CServiceBroker::GetGUI()->GetWindowManager().GetActiveWindow() == WINDOW_FULLSCREEN_VIDEO)
     {
       CServiceBroker::GetGUI()->GetWindowManager().ActivateWindow(WINDOW_HOME);
@@ -135,6 +145,7 @@ bool CApplicationSkinHandling::LoadSkin(const std::string& skinID,
 
   g_localizeStrings.LoadSkinStrings(langPath,
                                     settings->GetString(CSettings::SETTING_LOCALE_LANGUAGE));
+  g_SkinInfo->LoadTimers();
 
   const auto start = std::chrono::steady_clock::now();
 
@@ -149,12 +160,12 @@ bool CApplicationSkinHandling::LoadSkin(const std::string& skinID,
   CLog::Log(LOGDEBUG, "Load Skin XML: {:.2f} ms", duration.count());
 
   CLog::Log(LOGINFO, "  initialize new skin...");
-  CServiceBroker::GetGUI()->GetWindowManager().AddMsgTarget(msgCb);
+  CServiceBroker::GetGUI()->GetWindowManager().AddMsgTarget(m_msgCb);
   CServiceBroker::GetGUI()->GetWindowManager().AddMsgTarget(&CServiceBroker::GetPlaylistPlayer());
   CServiceBroker::GetGUI()->GetWindowManager().AddMsgTarget(&g_fontManager);
   CServiceBroker::GetGUI()->GetWindowManager().AddMsgTarget(
       &CServiceBroker::GetGUI()->GetStereoscopicsManager());
-  CServiceBroker::GetGUI()->GetWindowManager().SetCallback(*wCb);
+  CServiceBroker::GetGUI()->GetWindowManager().SetCallback(*m_wCb);
 
   //@todo should be done by GUIComponents
   CServiceBroker::GetGUI()->GetWindowManager().Initialize();
@@ -186,10 +197,10 @@ bool CApplicationSkinHandling::LoadSkin(const std::string& skinID,
   }
 
   // restore player and rendering state
-  if (m_appPlayer.IsPlayingVideo())
+  if (appPlayer && appPlayer->IsPlayingVideo())
   {
     if (bPreviousPlayingState)
-      m_appPlayer.Pause();
+      appPlayer->Pause();
 
     switch (previousRenderingState)
     {
@@ -213,6 +224,9 @@ void CApplicationSkinHandling::UnloadSkin()
     g_SkinInfo->SaveSettings();
   else if (!m_saveSkinOnUnloading)
     m_saveSkinOnUnloading = true;
+
+  if (g_SkinInfo)
+    g_SkinInfo->Unload();
 
   CGUIComponent* gui = CServiceBroker::GetGUI();
   if (gui)
@@ -361,12 +375,10 @@ bool CApplicationSkinHandling::LoadCustomWindows()
   return true;
 }
 
-void CApplicationSkinHandling::ReloadSkin(bool confirm,
-                                          IMsgTargetCallback* msgCb,
-                                          IWindowManagerCallback* wCb)
+void CApplicationSkinHandling::ReloadSkin(bool confirm)
 {
-  //  if (!g_SkinInfo || m_bInitializing)
-  //    return; // Don't allow reload before skin is loaded by system
+  if (!g_SkinInfo || m_bInitializing)
+    return; // Don't allow reload before skin is loaded by system
 
   std::string oldSkin = g_SkinInfo->ID();
 
@@ -376,7 +388,7 @@ void CApplicationSkinHandling::ReloadSkin(bool confirm,
 
   const std::shared_ptr<CSettings> settings = CServiceBroker::GetSettingsComponent()->GetSettings();
   std::string newSkin = settings->GetString(CSettings::SETTING_LOOKANDFEEL_SKIN);
-  if (LoadSkin(newSkin, msgCb, wCb))
+  if (LoadSkin(newSkin))
   {
     /* The Reset() or SetString() below will cause recursion, so the m_confirmSkinChange boolean is set so as to not prompt the
        user as to whether they want to keep the current skin. */
@@ -412,4 +424,101 @@ void CApplicationSkinHandling::ReloadSkin(bool confirm,
     }
   }
   m_confirmSkinChange = true;
+}
+
+bool CApplicationSkinHandling::OnSettingChanged(const CSetting& setting)
+{
+  const std::string& settingId = setting.GetId();
+
+  if (settingId == CSettings::SETTING_LOOKANDFEEL_SKIN ||
+      settingId == CSettings::SETTING_LOOKANDFEEL_FONT ||
+      settingId == CSettings::SETTING_LOOKANDFEEL_SKINTHEME ||
+      settingId == CSettings::SETTING_LOOKANDFEEL_SKINCOLORS)
+  {
+    // check if we should ignore this change event due to changing skins in which case we have to
+    // change several settings and each one of them could lead to a complete skin reload which would
+    // result in multiple skin reloads. Therefore we manually specify to ignore specific settings
+    // which are going to be changed.
+    if (m_ignoreSkinSettingChanges)
+      return true;
+
+    // if the skin changes and the current color/theme/font is not the default one, reset
+    // the it to the default value
+    if (settingId == CSettings::SETTING_LOOKANDFEEL_SKIN)
+    {
+      const std::shared_ptr<CSettings> settings =
+          CServiceBroker::GetSettingsComponent()->GetSettings();
+      SettingPtr skinRelatedSetting =
+          settings->GetSetting(CSettings::SETTING_LOOKANDFEEL_SKINCOLORS);
+      if (!skinRelatedSetting->IsDefault())
+      {
+        m_ignoreSkinSettingChanges = true;
+        skinRelatedSetting->Reset();
+      }
+
+      skinRelatedSetting = settings->GetSetting(CSettings::SETTING_LOOKANDFEEL_SKINTHEME);
+      if (!skinRelatedSetting->IsDefault())
+      {
+        m_ignoreSkinSettingChanges = true;
+        skinRelatedSetting->Reset();
+      }
+
+      skinRelatedSetting = settings->GetSetting(CSettings::SETTING_LOOKANDFEEL_FONT);
+      if (!skinRelatedSetting->IsDefault())
+      {
+        m_ignoreSkinSettingChanges = true;
+        skinRelatedSetting->Reset();
+      }
+    }
+    else if (settingId == CSettings::SETTING_LOOKANDFEEL_SKINTHEME)
+    {
+      std::shared_ptr<CSettingString> skinColorsSetting = std::static_pointer_cast<CSettingString>(
+          CServiceBroker::GetSettingsComponent()->GetSettings()->GetSetting(
+              CSettings::SETTING_LOOKANDFEEL_SKINCOLORS));
+      std::shared_ptr<CSettingString> skinFontSetting = std::static_pointer_cast<CSettingString>(
+          CServiceBroker::GetSettingsComponent()->GetSettings()->GetSetting(
+              CSettings::SETTING_LOOKANDFEEL_FONT));
+      m_ignoreSkinSettingChanges = true;
+
+      // we also need to adjust the skin color theme and fontset
+      std::string theme = static_cast<const CSettingString&>(setting).GetValue();
+      if (setting.IsDefault() || StringUtils::EqualsNoCase(theme, "Textures.xbt"))
+      {
+        skinColorsSetting->Reset();
+        skinFontSetting->Reset();
+      }
+      else
+      {
+        URIUtils::RemoveExtension(theme);
+        skinColorsSetting->SetValue(theme);
+        skinFontSetting->SetValue(theme);
+      }
+    }
+
+    m_ignoreSkinSettingChanges = false;
+
+    if (g_SkinInfo)
+    {
+      // now we can finally reload skins
+      std::string builtin("ReloadSkin");
+      if (settingId == CSettings::SETTING_LOOKANDFEEL_SKIN && m_confirmSkinChange)
+        builtin += "(confirm)";
+      CServiceBroker::GetAppMessenger()->PostMsg(TMSG_EXECUTE_BUILT_IN, -1, -1, nullptr, builtin);
+    }
+  }
+  else if (settingId == CSettings::SETTING_LOOKANDFEEL_SKINZOOM)
+  {
+    CGUIMessage msg(GUI_MSG_NOTIFY_ALL, 0, 0, GUI_MSG_WINDOW_RESIZE);
+    CServiceBroker::GetGUI()->GetWindowManager().SendThreadMessage(msg);
+  }
+  else
+    return false;
+
+  return true;
+}
+
+void CApplicationSkinHandling::ProcessSkin() const
+{
+  if (g_SkinInfo != nullptr)
+    g_SkinInfo->ProcessTimers();
 }

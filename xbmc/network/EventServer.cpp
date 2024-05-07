@@ -8,15 +8,15 @@
 
 #include "EventServer.h"
 
-#include "Application.h"
 #include "EventClient.h"
 #include "EventPacket.h"
 #include "ServiceBroker.h"
 #include "Socket.h"
-#include "Util.h"
 #include "Zeroconf.h"
+#include "application/Application.h"
 #include "guilib/GUIAudioManager.h"
-#include "input/Key.h"
+#include "input/actions/Action.h"
+#include "input/actions/ActionIDs.h"
 #include "input/actions/ActionTranslator.h"
 #include "interfaces/builtins/Builtins.h"
 #include "utils/SystemInfo.h"
@@ -27,6 +27,7 @@
 #include <mutex>
 #include <queue>
 
+using namespace KODI;
 using namespace EVENTSERVER;
 using namespace EVENTPACKET;
 using namespace EVENTCLIENT;
@@ -41,7 +42,6 @@ std::unique_ptr<CEventServer> CEventServer::m_pInstance;
 CEventServer::CEventServer() : CThread("EventServer")
 {
   m_bStop         = false;
-  m_bRunning      = false;
   m_bRefreshSettings = false;
 
   // default timeout in ms for receiving a single packet
@@ -149,12 +149,10 @@ void CEventServer::Run()
   }
 
   // publish service
-  std::vector<std::pair<std::string, std::string> > txt;
-  CZeroconf::GetInstance()->PublishService("servers.eventserver",
-                               "_xbmc-events._udp",
-                               CSysInfo::GetDeviceName(),
-                               m_iPort,
-                               txt);
+  std::vector<std::pair<std::string, std::string>> txt;
+  CZeroconf::GetInstance()->PublishService("servers.eventserver", "_xbmc-events._udp",
+                                           CSysInfo::GetDeviceName() + " eventserver", m_iPort,
+                                           txt);
 
   // add our socket to the 'select' listener
   listener.AddSocket(m_pSocket.get());
@@ -305,7 +303,7 @@ bool CEventServer::ExecuteNextAction()
       case AT_BUTTON:
         {
           unsigned int actionID;
-          CActionTranslator::TranslateString(actionEvent.actionName, actionID);
+          ACTION::CActionTranslator::TranslateString(actionEvent.actionName, actionID);
           CAction action(actionID, 1.0f, 0.0f, actionEvent.actionName);
           CGUIComponent* gui = CServiceBroker::GetGUI();
           if (gui)

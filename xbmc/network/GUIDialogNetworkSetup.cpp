@@ -10,7 +10,6 @@
 
 #include "ServiceBroker.h"
 #include "URL.h"
-#include "addons/AddonManager.h"
 #include "addons/VFSEntry.h"
 #include "dialogs/GUIDialogFileBrowser.h"
 #include "guilib/GUIComponent.h"
@@ -195,8 +194,7 @@ void CGUIDialogNetworkSetup::InitializeSettings()
   // Add our protocols
   TranslatableIntegerSettingOptions labels;
   for (size_t idx = 0; idx < m_protocols.size(); ++idx)
-    labels.push_back(
-        TranslatableIntegerSettingOption(m_protocols[idx].label, idx, m_protocols[idx].addonId));
+    labels.emplace_back(m_protocols[idx].label, static_cast<int>(idx), m_protocols[idx].addonId);
 
   AddSpinner(group, SETTING_PROTOCOL, 1008, SettingLevel::Basic, m_protocol, labels);
   AddEdit(group, SETTING_SERVER_ADDRESS, 1010, SettingLevel::Basic, m_server, true);
@@ -403,7 +401,7 @@ bool CGUIDialogNetworkSetup::SetPath(const std::string &path)
   }
   if (m_protocol == -1)
   {
-    CLog::Log(LOGERROR, "__PRETTY_FUNCTION__: Asked to initialize for unknown path {}", path);
+    CLog::LogF(LOGERROR, "Asked to initialize for unknown path {}", path);
     Reset();
     return false;
   }
@@ -439,7 +437,7 @@ void CGUIDialogNetworkSetup::UpdateAvailableProtocols()
   m_protocols.emplace_back(Protocol{true, true, true, false, true, 0, "smb", 20171, ""});
 #endif
   // protocols from vfs addon next
-  if (CServiceBroker::IsBinaryAddonCacheUp())
+  if (CServiceBroker::IsAddonInterfaceUp())
   {
     for (const auto& addon : CServiceBroker::GetVFSAddonCache().GetAddonInstances())
     {

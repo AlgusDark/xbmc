@@ -8,16 +8,19 @@
 
 #include "PlayListFactory.h"
 
-#include "PlayListB4S.h"
-#include "PlayListM3U.h"
-#include "PlayListPLS.h"
-#include "PlayListURL.h"
-#include "PlayListWPL.h"
-#include "PlayListXML.h"
-#include "PlayListXSPF.h"
+#include "FileItem.h"
+#include "network/NetworkFileItemClassify.h"
+#include "playlists/PlayListB4S.h"
+#include "playlists/PlayListM3U.h"
+#include "playlists/PlayListPLS.h"
+#include "playlists/PlayListURL.h"
+#include "playlists/PlayListWPL.h"
+#include "playlists/PlayListXML.h"
+#include "playlists/PlayListXSPF.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 
+using namespace KODI;
 using namespace PLAYLIST;
 
 CPlayList* CPlayListFactory::Create(const std::string& filename)
@@ -28,7 +31,7 @@ CPlayList* CPlayListFactory::Create(const std::string& filename)
 
 CPlayList* CPlayListFactory::Create(const CFileItem& item)
 {
-  if (item.IsInternetStream())
+  if (NETWORK::IsInternetStream(item))
   {
     // Ensure the MIME type has been retrieved for http:// and shout:// streams
     if (item.GetMimeType().empty())
@@ -70,7 +73,8 @@ CPlayList* CPlayListFactory::Create(const CFileItem& item)
   std::string extension = URIUtils::GetExtension(path);
   StringUtils::ToLower(extension);
 
-  if (extension == ".m3u" || extension == ".strm")
+  if (extension == ".m3u" || (extension == ".m3u8" && !NETWORK::IsInternetStream(item)) ||
+      extension == ".strm")
     return new CPlayListM3U();
 
   if (extension == ".pls")
@@ -119,7 +123,7 @@ bool CPlayListFactory::IsPlaylist(const CFileItem& item)
 */
 
   // online m3u8 files are hls:// -- do not treat as playlist
-  if (item.IsInternetStream() && item.IsType(".m3u8"))
+  if (NETWORK::IsInternetStream(item) && item.IsType(".m3u8"))
     return false;
 
   if(strMimeType == "audio/x-pn-realaudio"
@@ -133,12 +137,12 @@ bool CPlayListFactory::IsPlaylist(const CFileItem& item)
 bool CPlayListFactory::IsPlaylist(const CURL& url)
 {
   return URIUtils::HasExtension(url,
-                                ".m3u|.b4s|.pls|.strm|.wpl|.asx|.ram|.url|.pxml|.xspf");
+                                ".m3u|.m3u8|.b4s|.pls|.strm|.wpl|.asx|.ram|.url|.pxml|.xspf");
 }
 
 bool CPlayListFactory::IsPlaylist(const std::string& filename)
 {
   return URIUtils::HasExtension(filename,
-                     ".m3u|.b4s|.pls|.strm|.wpl|.asx|.ram|.url|.pxml|.xspf");
+                     ".m3u|.m3u8|.b4s|.pls|.strm|.wpl|.asx|.ram|.url|.pxml|.xspf");
 }
 

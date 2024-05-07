@@ -9,9 +9,15 @@
 #include "RepositoryUpdater.h"
 
 #include "ServiceBroker.h"
+#include "TextureDatabase.h"
+#include "addons/AddonDatabase.h"
+#include "addons/AddonEvents.h"
 #include "addons/AddonInstaller.h"
 #include "addons/AddonManager.h"
 #include "addons/AddonSystemSettings.h"
+#include "addons/Repository.h"
+#include "addons/addoninfo/AddonInfo.h"
+#include "addons/addoninfo/AddonType.h"
 #include "dialogs/GUIDialogExtendedProgressBar.h"
 #include "dialogs/GUIDialogKaiToast.h"
 #include "events/AddonManagementEvent.h"
@@ -23,6 +29,7 @@
 #include "settings/SettingsComponent.h"
 #include "settings/lib/Setting.h"
 #include "utils/JobManager.h"
+#include "utils/ProgressJob.h"
 #include "utils/log.h"
 
 #include <algorithm>
@@ -34,6 +41,86 @@ using namespace std::chrono_literals;
 
 namespace ADDON
 {
+
+class CRepositoryUpdateJob : public CProgressJob
+{
+public:
+  explicit CRepositoryUpdateJob(const RepositoryPtr& repo) : m_repo(repo) {}
+  ~CRepositoryUpdateJob() override = default;
+  bool DoWork() override;
+  const RepositoryPtr& GetAddon() const { return m_repo; }
+
+private:
+  const RepositoryPtr m_repo;
+};
+
+bool CRepositoryUpdateJob::DoWork()
+{
+  CLog::Log(LOGDEBUG, "CRepositoryUpdateJob[{}] checking for updates.", m_repo->ID());
+  CAddonDatabase database;
+  database.Open();
+
+  std::string oldChecksum;
+  if (database.GetRepoChecksum(m_repo->ID(), oldChecksum) == -1)
+    oldChecksum = "";
+
+  const CAddonDatabase::RepoUpdateData updateData{database.GetRepoUpdateData(m_repo->ID())};
+  if (updateData.lastCheckedVersion != m_repo->Version())
+    oldChecksum = "";
+
+  std::string newChecksum;
+  std::vector<AddonInfoPtr> addons;
+  int recheckAfter;
+  auto status = m_repo->FetchIfChanged(oldChecksum, newChecksum, addons, recheckAfter);
+
+  database.SetRepoUpdateData(
+      m_repo->ID(), CAddonDatabase::RepoUpdateData(
+                        CDateTime::GetCurrentDateTime(), m_repo->Version(),
+                        CDateTime::GetCurrentDateTime() + CDateTimeSpan(0, 0, 0, recheckAfter)));
+
+  MarkFinished();
+
+  if (status == CRepository::STATUS_ERROR)
+    return false;
+
+  if (status == CRepository::STATUS_NOT_MODIFIED)
+  {
+    CLog::Log(LOGDEBUG, "CRepositoryUpdateJob[{}] checksum not changed.", m_repo->ID());
+    return true;
+  }
+
+  //Invalidate art.
+  {
+    CTextureDatabase textureDB;
+    textureDB.Open();
+    textureDB.BeginMultipleExecute();
+
+    for (const auto& addon : addons)
+    {
+      AddonPtr oldAddon;
+      if (CServiceBroker::GetAddonMgr().FindInstallableById(addon->ID(), oldAddon) && oldAddon &&
+          addon->Version() > oldAddon->Version())
+      {
+        if (!oldAddon->Icon().empty() || !oldAddon->Art().empty() ||
+            !oldAddon->Screenshots().empty())
+          CLog::Log(LOGDEBUG, "CRepository: invalidating cached art for '{}'", addon->ID());
+
+        if (!oldAddon->Icon().empty())
+          textureDB.InvalidateCachedTexture(oldAddon->Icon());
+
+        for (const auto& path : oldAddon->Screenshots())
+          textureDB.InvalidateCachedTexture(path);
+
+        for (const auto& art : oldAddon->Art())
+          textureDB.InvalidateCachedTexture(art.second);
+      }
+    }
+    textureDB.CommitMultipleExecute();
+  }
+
+  database.UpdateRepositoryContent(m_repo->ID(), m_repo->Version(), newChecksum, addons);
+  return true;
+}
 
 CRepositoryUpdater::CRepositoryUpdater(CAddonMgr& addonMgr) :
   m_timer(this),
@@ -49,7 +136,7 @@ CRepositoryUpdater::CRepositoryUpdater(CAddonMgr& addonMgr) :
 void CRepositoryUpdater::Start()
 {
   m_addonMgr.Events().Subscribe(this, &CRepositoryUpdater::OnEvent);
-  ScheduleUpdate();
+  ScheduleUpdate(UpdateScheduleType::First);
 }
 
 CRepositoryUpdater::~CRepositoryUpdater()
@@ -64,8 +151,8 @@ void CRepositoryUpdater::OnEvent(const ADDON::AddonEvent& event)
 {
   if (typeid(event) == typeid(ADDON::AddonEvents::Enabled))
   {
-    if (m_addonMgr.HasType(event.id, ADDON_REPOSITORY))
-      ScheduleUpdate();
+    if (m_addonMgr.HasType(event.addonId, AddonType::REPOSITORY))
+      ScheduleUpdate(UpdateScheduleType::First);
   }
 }
 
@@ -107,7 +194,7 @@ void CRepositoryUpdater::OnJobComplete(unsigned int jobID, bool success, CJob* j
       m_addonMgr.CheckAndInstallAddonUpdates(false);
     }
 
-    ScheduleUpdate();
+    ScheduleUpdate(UpdateScheduleType::Regular);
 
     m_events.Publish(RepositoryUpdated{});
   }
@@ -116,7 +203,7 @@ void CRepositoryUpdater::OnJobComplete(unsigned int jobID, bool success, CJob* j
 bool CRepositoryUpdater::CheckForUpdates(bool showProgress)
 {
   VECADDONS addons;
-  if (m_addonMgr.GetAddons(addons, ADDON_REPOSITORY) && !addons.empty())
+  if (m_addonMgr.GetAddons(addons, AddonType::REPOSITORY) && !addons.empty())
   {
     std::unique_lock<CCriticalSection> lock(m_criticalSection);
     for (const auto& addon : addons)
@@ -181,13 +268,13 @@ void CRepositoryUpdater::OnTimeout()
 void CRepositoryUpdater::OnSettingChanged(const std::shared_ptr<const CSetting>& setting)
 {
   if (setting->GetId() == CSettings::SETTING_ADDONS_AUTOUPDATES)
-    ScheduleUpdate();
+    ScheduleUpdate(UpdateScheduleType::First);
 }
 
 CDateTime CRepositoryUpdater::LastUpdated() const
 {
   VECADDONS repos;
-  if (!m_addonMgr.GetAddons(repos, ADDON_REPOSITORY) || repos.empty())
+  if (!m_addonMgr.GetAddons(repos, AddonType::REPOSITORY) || repos.empty())
     return CDateTime();
 
   CAddonDatabase db;
@@ -207,7 +294,7 @@ CDateTime CRepositoryUpdater::LastUpdated() const
 CDateTime CRepositoryUpdater::ClosestNextCheck() const
 {
   VECADDONS repos;
-  if (!m_addonMgr.GetAddons(repos, ADDON_REPOSITORY) || repos.empty())
+  if (!m_addonMgr.GetAddons(repos, AddonType::REPOSITORY) || repos.empty())
     return CDateTime();
 
   CAddonDatabase db;
@@ -224,7 +311,7 @@ CDateTime CRepositoryUpdater::ClosestNextCheck() const
   return *std::min_element(nextCheckTimes.begin(), nextCheckTimes.end());
 }
 
-void CRepositoryUpdater::ScheduleUpdate()
+void CRepositoryUpdater::ScheduleUpdate(UpdateScheduleType scheduleType)
 {
   std::unique_lock<CCriticalSection> lock(m_criticalSection);
   m_timer.Stop(true);
@@ -232,7 +319,7 @@ void CRepositoryUpdater::ScheduleUpdate()
   if (CAddonSystemSettings::GetInstance().GetAddonAutoUpdateMode() == AUTO_UPDATES_NEVER)
     return;
 
-  if (!m_addonMgr.HasAddons(ADDON_REPOSITORY))
+  if (!m_addonMgr.HasAddons(AddonType::REPOSITORY))
     return;
 
   int delta{1};
@@ -244,6 +331,21 @@ void CRepositoryUpdater::ScheduleUpdate()
     CLog::Log(LOGDEBUG, "CRepositoryUpdater: closest next update check at {} (in {} s)",
               nextCheck.GetAsLocalizedDateTime(), delta / 1000);
   }
+
+  if (scheduleType == UpdateScheduleType::Regular)
+  {
+    // Enforce minimum hold-off time of 1 hour between regular updates - this is especially
+    // important to handle all sorts of failure cases (e.g., failure to update the add-on database)
+    // that would otherwise lead to an immediate new update attempt and continuous hammering of the servers.
+    delta = std::max(1 * 60 * 60 * 1'000, delta);
+  }
+  else
+  {
+    // delta must be positive and not zero (m_timer.Start() ignores 0 wait time)
+    delta = std::max(1, delta);
+  }
+
+  CLog::Log(LOGDEBUG, "CRepositoryUpdater: checking in {} ms", delta);
 
   if (!m_timer.Start(std::chrono::milliseconds(delta)))
     CLog::Log(LOGERROR,"CRepositoryUpdater: failed to start timer");

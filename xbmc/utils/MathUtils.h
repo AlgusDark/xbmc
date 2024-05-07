@@ -8,10 +8,11 @@
 
 #pragma once
 
-#include <stdint.h>
 #include <assert.h>
 #include <climits>
 #include <cmath>
+#include <stdint.h>
+#include <type_traits>
 
 #if defined(HAVE_SSE2) && defined(__SSE2__)
 #include <emmintrin.h>
@@ -26,6 +27,7 @@
     defined(__alpha__) || \
     defined(__arc__) || \
     defined(__arm__) || \
+    defined(__loongarch__) || \
     defined(_M_ARM) || \
     defined(__mips__) || \
     defined(__or1k__) || \
@@ -198,6 +200,22 @@ namespace MathUtils
   inline bool FloatEquals(FloatT f1, FloatT f2, FloatT maxDelta)
   {
     return (std::abs(f2 - f1) < maxDelta);
+  }
+
+  /*!
+   * \brief Round a floating point number to nearest multiple
+   * \param value The value to round
+   * \param multiple The multiple
+   * \return The rounded value
+   */
+  template<typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
+  inline T RoundF(const T value, const T multiple)
+  {
+    if (multiple == 0)
+      return value;
+
+    return static_cast<T>(std::round(static_cast<double>(value) / static_cast<double>(multiple)) *
+                          static_cast<double>(multiple));
   }
 
 #if 0

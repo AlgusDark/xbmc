@@ -8,10 +8,10 @@
 
 #include "NetworkServices.h"
 
-#include <utility>
-
 #include "ServiceBroker.h"
 #include "dialogs/GUIDialogKaiToast.h"
+#include "guilib/GUIComponent.h"
+#include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
 #include "interfaces/json-rpc/JSONRPC.h"
 #include "messaging/ApplicationMessenger.h"
@@ -21,14 +21,16 @@
 #include "network/Network.h"
 #include "network/TCPServer.h"
 #include "settings/AdvancedSettings.h"
-#include "settings/lib/Setting.h"
-#include "settings/lib/SettingsManager.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
-#include "utils/log.h"
+#include "settings/lib/Setting.h"
+#include "settings/lib/SettingsManager.h"
 #include "utils/RssManager.h"
 #include "utils/SystemInfo.h"
 #include "utils/Variant.h"
+#include "utils/log.h"
+
+#include <utility>
 
 #ifdef TARGET_LINUX
 #include "Util.h"
@@ -72,7 +74,7 @@
 #endif
 #endif
 
-#if defined(TARGET_DARWIN_OSX)
+#if defined(TARGET_DARWIN_OSX) and defined(HAS_XBMCHELPER)
 #include "platform/darwin/osx/XBMCHelper.h"
 #endif
 
@@ -430,7 +432,7 @@ bool CNetworkServices::OnSettingChanging(const std::shared_ptr<const CSetting>& 
       return false;
     }
 
-#if defined(TARGET_DARWIN_OSX)
+#if defined(TARGET_DARWIN_OSX) and defined(HAS_XBMCHELPER)
     // reconfigure XBMCHelper for port changes
     XBMCHelper::GetInstance().Configure();
 #endif // TARGET_DARWIN_OSX
@@ -709,9 +711,12 @@ bool CNetworkServices::StartWebserver()
 
   // publish web frontend and API services
 #ifdef HAS_WEB_INTERFACE
-  CZeroconf::GetInstance()->PublishService("servers.webserver", "_http._tcp", CSysInfo::GetDeviceName(), webPort, txt);
+  CZeroconf::GetInstance()->PublishService("servers.webserver", "_http._tcp",
+                                           CSysInfo::GetDeviceName() + " webserver", webPort, txt);
 #endif // HAS_WEB_INTERFACE
-  CZeroconf::GetInstance()->PublishService("servers.jsonrpc-http", "_xbmc-jsonrpc-h._tcp", CSysInfo::GetDeviceName(), webPort, txt);
+  CZeroconf::GetInstance()->PublishService("servers.jsonrpc-http", "_xbmc-jsonrpc-h._tcp",
+                                           CSysInfo::GetDeviceName() + " jsonrpc-http", webPort,
+                                           txt);
 #endif // HAS_ZEROCONF
 
   return true;
@@ -783,7 +788,9 @@ bool CNetworkServices::StartAirPlayServer()
   // we have implemented it anyways).
   txt.emplace_back("features", "0x20F7");
 
-  CZeroconf::GetInstance()->PublishService("servers.airplay", "_airplay._tcp", CSysInfo::GetDeviceName(), CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_airPlayPort, txt);
+  CZeroconf::GetInstance()->PublishService(
+      "servers.airplay", "_airplay._tcp", CSysInfo::GetDeviceName() + " airplay",
+      CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_airPlayPort, txt);
 #endif // HAS_ZEROCONF
 
   return true;
@@ -875,7 +882,9 @@ bool CNetworkServices::StartJSONRPCServer()
   txt.emplace_back("uuid", CServiceBroker::GetSettingsComponent()->GetSettings()->GetString(
                              CSettings::SETTING_SERVICES_DEVICEUUID));
 
-  CZeroconf::GetInstance()->PublishService("servers.jsonrpc-tpc", "_xbmc-jsonrpc._tcp", CSysInfo::GetDeviceName(), CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_jsonTcpPort, txt);
+  CZeroconf::GetInstance()->PublishService(
+      "servers.jsonrpc-tcp", "_xbmc-jsonrpc._tcp", CSysInfo::GetDeviceName() + " jsonrpc-tcp",
+      CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_jsonTcpPort, txt);
 #endif // HAS_ZEROCONF
 
   return true;

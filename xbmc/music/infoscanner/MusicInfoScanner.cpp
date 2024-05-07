@@ -9,6 +9,7 @@
 #include "MusicInfoScanner.h"
 
 #include "FileItem.h"
+#include "FileItemList.h"
 #include "GUIInfoManager.h"
 #include "GUIUserMessages.h"
 #include "MusicAlbumInfo.h"
@@ -16,10 +17,11 @@
 #include "NfoFile.h"
 #include "ServiceBroker.h"
 #include "TextureCache.h"
+#include "URL.h"
 #include "Util.h"
-#include "addons/AddonManager.h"
 #include "addons/AddonSystemSettings.h"
 #include "addons/Scraper.h"
+#include "addons/addoninfo/AddonType.h"
 #include "dialogs/GUIDialogExtendedProgressBar.h"
 #include "dialogs/GUIDialogProgress.h"
 #include "dialogs/GUIDialogSelect.h"
@@ -27,7 +29,6 @@
 #include "events/EventLog.h"
 #include "events/MediaLibraryEvent.h"
 #include "filesystem/Directory.h"
-#include "filesystem/File.h"
 #include "filesystem/MusicDatabaseDirectory.h"
 #include "filesystem/MusicDatabaseDirectory/DirectoryNode.h"
 #include "filesystem/SmartPlaylistDirectory.h"
@@ -36,6 +37,7 @@
 #include "guilib/GUIWindowManager.h"
 #include "guilib/LocalizeStrings.h"
 #include "interfaces/AnnouncementManager.h"
+#include "music/MusicFileItemClassify.h"
 #include "music/MusicLibraryQueue.h"
 #include "music/MusicThumbLoader.h"
 #include "music/MusicUtils.h"
@@ -46,6 +48,7 @@
 #include "settings/SettingsComponent.h"
 #include "utils/Digest.h"
 #include "utils/FileExtensionProvider.h"
+#include "utils/FileUtils.h"
 #include "utils/StringUtils.h"
 #include "utils/URIUtils.h"
 #include "utils/Variant.h"
@@ -54,6 +57,7 @@
 #include <algorithm>
 #include <utility>
 
+using namespace KODI;
 using namespace MUSIC_INFO;
 using namespace XFILE;
 using namespace MUSICDATABASEDIRECTORY;
@@ -576,7 +580,7 @@ CInfoScanner::INFO_RET CMusicInfoScanner::ScanTags(const CFileItemList& items,
     if (CUtil::ExcludeFileOrFolder(pItem->GetPath(), regexps))
       continue;
 
-    if (pItem->m_bIsFolder || pItem->IsPlayList() || pItem->IsPicture() || pItem->IsLyrics())
+    if (pItem->m_bIsFolder || pItem->IsPlayList() || pItem->IsPicture() || MUSIC::IsLyrics(*pItem))
       continue;
 
     m_currentItem++;
@@ -995,10 +999,11 @@ void MUSIC_INFO::CMusicInfoScanner::ScrapeInfoAddedAlbums()
 
   ADDON::ScraperPtr albumScraper;
   ADDON::ScraperPtr artistScraper;
-  if (ADDON::CAddonSystemSettings::GetInstance().GetActive(ADDON::ADDON_SCRAPER_ALBUMS, addon))
+  if (ADDON::CAddonSystemSettings::GetInstance().GetActive(ADDON::AddonType::SCRAPER_ALBUMS, addon))
     albumScraper = std::dynamic_pointer_cast<ADDON::CScraper>(addon);
 
-  if (ADDON::CAddonSystemSettings::GetInstance().GetActive(ADDON::ADDON_SCRAPER_ARTISTS, addon))
+  if (ADDON::CAddonSystemSettings::GetInstance().GetActive(ADDON::AddonType::SCRAPER_ARTISTS,
+                                                           addon))
     artistScraper = std::dynamic_pointer_cast<ADDON::CScraper>(addon);
 
   bool albumartistsonly = !CServiceBroker::GetSettingsComponent()->GetSettings()->GetBool(CSettings::SETTING_MUSICLIBRARY_SHOWCOMPILATIONARTISTS);
@@ -1269,7 +1274,7 @@ int CMusicInfoScanner::GetPathHash(const CFileItemList &items, std::string &hash
     digest.Update((unsigned char *)&pItem->m_dwSize, sizeof(pItem->m_dwSize));
     KODI::TIME::FileTime time = pItem->m_dateTime;
     digest.Update((unsigned char*)&time, sizeof(KODI::TIME::FileTime));
-    if (pItem->IsAudio() && !pItem->IsPlayList() && !pItem->IsNFO())
+    if (MUSIC::IsAudio(*pItem) && !pItem->IsPlayList() && !pItem->IsNFO())
       count++;
   }
   hash = digest.Finalize();
@@ -1487,7 +1492,7 @@ CMusicInfoScanner::DownloadAlbumInfo(const CAlbum& album,
   std::string strNfo = URIUtils::AddFileToFolder(path, "album.nfo");
   CInfoScanner::INFO_TYPE result = CInfoScanner::NO_NFO;
   CNfoFile nfoReader;
-  existsNFO = XFILE::CFile::Exists(strNfo);
+  existsNFO = CFileUtils::Exists(strNfo);
   // When on GUI ask user if they want to ignore nfo and refresh from Internet
   if (existsNFO && pDialog && CGUIDialogYesNo::ShowAndGetInput(10523, 20446))
   {
@@ -1754,7 +1759,7 @@ CMusicInfoScanner::DownloadArtistInfo(const CArtist& artist,
   if (artistpathfound)
   {
     strNfo = URIUtils::AddFileToFolder(path, "artist.nfo");
-    existsNFO = XFILE::CFile::Exists(strNfo);
+    existsNFO = CFileUtils::Exists(strNfo);
   }
 
   // If not there fall back local to music files (historic location for those album artists with a unique folder)
@@ -1764,7 +1769,7 @@ CMusicInfoScanner::DownloadArtistInfo(const CArtist& artist,
     if (artistpathfound)
     {
       strNfo = URIUtils::AddFileToFolder(path, "artist.nfo");
-      existsNFO = XFILE::CFile::Exists(strNfo);
+      existsNFO = CFileUtils::Exists(strNfo);
     }
     else
       CLog::Log(LOGDEBUG, "{} not have path, nfo file not possible", artist.strArtist);
@@ -2329,7 +2334,7 @@ int CMusicInfoScanner::CountFiles(const CFileItemList &items, bool recursive)
 
     if (recursive && pItem->m_bIsFolder)
       count+=CountFilesRecursively(pItem->GetPath());
-    else if (pItem->IsAudio() && !pItem->IsPlayList() && !pItem->IsNFO())
+    else if (MUSIC::IsAudio(*pItem) && !pItem->IsPlayList() && !pItem->IsNFO())
       count++;
   }
   return count;
